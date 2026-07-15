@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PaperMind AI — Local RAG Research Assistant</title>
+    <meta name="description" content="PaperMind AI is a local RAG-powered research assistant for academic paper analysis, QA, summarization, and study tools." />
+
+    <!-- Favicon (inline SVG) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><text x='7' y='23' font-size='18' fill='white' font-family='system-ui'>P</text></svg>" />
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+
+<div class="app-shell">
+    <!-- ========== SIDEBAR ========== -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div style="width:40px;height:40px;border-radius:8px;background:var(--primary-container);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <span class="material-symbols-outlined" style="color:var(--on-primary-container);font-size:24px;">neurology</span>
+            </div>
+            <div class="sidebar-brand-text">
+                <div class="brand-name">PaperMind</div>
+                <div class="brand-sub">AI Research Assistant</div>
+            </div>
+        </div>
+
+        <nav class="nav-items">
+            <a class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span>Dashboard</span>
+            </a>
+            <a class="nav-item" data-page="library" onclick="navigate('library')">
+                <span class="material-symbols-outlined">library_books</span>
+                <span>Library</span>
+            </a>
+            <a class="nav-item" data-page="upload" onclick="navigate('upload')">
+                <span class="material-symbols-outlined">upload_file</span>
+                <span>Upload</span>
+            </a>
+            <a class="nav-item" data-page="qa" onclick="navigate('qa')">
+                <span class="material-symbols-outlined">chat_bubble</span>
+                <span>QA</span>
+            </a>
+            <a class="nav-item" data-page="summary" onclick="navigate('summary')">
+                <span class="material-symbols-outlined">article</span>
+                <span>Summary</span>
+            </a>
+            <a class="nav-item" data-page="study-tools" onclick="navigate('study-tools')">
+                <span class="material-symbols-outlined">school</span>
+                <span>Study Tools</span>
+            </a>
+            <a class="nav-item" data-page="research-gaps" onclick="navigate('research-gaps')">
+                <span class="material-symbols-outlined">troubleshoot</span>
+                <span>Research Gaps</span>
+            </a>
+        </nav>
+
+        <div class="nav-footer">
+            <a class="nav-item" data-page="settings" onclick="navigate('settings')">
+                <span class="material-symbols-outlined">settings</span>
+                <span>Settings</span>
+            </a>
+            <a class="nav-item" onclick="window.open('/docs', '_blank')" style="cursor:pointer;">
+                <span class="material-symbols-outlined">help</span>
+                <span>API Docs</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <div class="main-content">
+        <!-- Top Navigation -->
+        <header class="topnav">
+            <div class="topnav-left">
+                <!-- Mobile menu button -->
+                <button class="icon-btn" id="mobile-menu-btn" onclick="toggleSidebar()" style="display:none;background:none;border:none;color:var(--on-surface-variant);cursor:pointer;">
+                    <span class="material-symbols-outlined">menu</span>
+                </button>
+                <h1 class="topnav-title" id="topnav-title">Dashboard</h1>
+            </div>
+
+            <div class="topnav-right">
+                <div class="topnav-search" id="topnav-search">
+                    <span class="material-symbols-outlined">search</span>
+                    <input type="text" placeholder="Search papers, questions, or sessions..." />
+                </div>
+                <button class="icon-btn" title="Notifications">
+                    <span class="material-symbols-outlined">notifications</span>
+                </button>
+                <button class="icon-btn" title="Profile">
+                    <span class="material-symbols-outlined">account_circle</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dynamic Page Content -->
+        <main class="page-container" id="page-content">
+            <!-- Content injected by app.js -->
+            <div style="display:flex;justify-content:center;padding:80px 0;">
+                <div class="spinner"></div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <div style="display:flex;align-items:center;gap:16px;">
+                <span class="footer-brand">PaperMind</span>
+                <span class="footer-ver">v1.0.0 • Offline Mode</span>
+            </div>
+            <div class="footer-links">
+                <a href="/docs" target="_blank">API Docs</a>
+                <a href="/health" target="_blank">Health</a>
+            </div>
+        </footer>
+    </div>
+</div>
+
+<!-- ========== MOBILE BOTTOM NAV ========== -->
+<nav class="mobile-nav" id="mobile-nav">
+    <button class="mobile-nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+        <span class="material-symbols-outlined">dashboard</span>
+        <span>Home</span>
+    </button>
+    <button class="mobile-nav-item" data-page="library" onclick="navigate('library')">
+        <span class="material-symbols-outlined">library_books</span>
+        <span>Library</span>
+    </button>
+    <button class="mobile-fab" onclick="navigate('upload')">
+        <span class="material-symbols-outlined">add</span>
+    </button>
+    <button class="mobile-nav-item" data-page="qa" onclick="navigate('qa')">
+        <span class="material-symbols-outlined">chat_bubble</span>
+        <span>QA</span>
+    </button>
+    <button class="mobile-nav-item" data-page="settings" onclick="navigate('settings')">
+        <span class="material-symbols-outlined">settings</span>
+        <span>Settings</span>
+    </button>
+</nav>
+
+<!-- Mobile Sidebar Toggle -->
+<script>
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const isOpen = sidebar.style.transform !== 'translateX(-100%)';
+        sidebar.style.transform = isOpen ? 'translateX(-100%)' : 'translateX(0)';
+    }
+
+    // Show/hide mobile menu button based on viewport
+    function handleResize() {
+        const btn = document.getElementById('mobile-menu-btn');
+        if (window.innerWidth < 1024) {
+            btn.style.display = 'block';
+        } else {
+            btn.style.display = 'none';
+            document.getElementById('sidebar').style.transform = '';
+        }
+    }
+    window.addEventListener('resize', handleResize);
+    handleResize();
+</script>
+
+<!-- Main Application Script -->
+<script src="/static/js/app.js"></script>
+
+</body>
+</html>
