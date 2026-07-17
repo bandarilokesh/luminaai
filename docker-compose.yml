@@ -3,13 +3,17 @@ version: "3.8"
 services:
   backend:
     build: .
-    container_name: papermind-backend
+    container_name: lumina-ai-backend
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
       - DEBUG=False
-      - OLLAMA_API_BASE=http://host.docker.internal:11434
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - MODEL_NAME=${MODEL_NAME:-gemini-flash-lite-latest}
+      - TEMPERATURE=${TEMPERATURE:-0.2}
+      - MAX_TOKENS=${MAX_TOKENS:-1024}
     volumes:
       - ./uploads:/app/uploads
       - ./cache:/app/cache
@@ -19,21 +23,4 @@ services:
       - "host.docker.internal:host-gateway"
     restart: always
 
-  frontend:
-    build: .
-    container_name: papermind-frontend
-    command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
-    ports:
-      - "8501:8501"
-    environment:
-      - OLLAMA_API_BASE=http://host.docker.internal:11434
-    depends_on:
-      - backend
-    volumes:
-      - ./uploads:/app/uploads
-      - ./cache:/app/cache
-      - ./database:/app/database
-      - ./logs:/app/logs
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: always
+

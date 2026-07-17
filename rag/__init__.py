@@ -1,1 +1,1 @@
-"""RAG package for PaperMind AI. Contains chunkers, retriever pipelines, re-rankers, and vector database adapters."""
+"""RAG package for Lumina Ai. Contains chunkers, retriever pipelines, re-rankers, and vector database adapters."""

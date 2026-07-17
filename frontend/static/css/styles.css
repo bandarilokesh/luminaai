@@ -1,6 +1,6 @@
 /* ============================================================
-   PaperMind AI — Academic Intelligence Design System
-   Based on Stitch "PaperMind UI Redesign" project
+   Lumina Ai — Academic Intelligence Design System
+   Based on Stitch "Lumina Ai UI Redesign" project
    ============================================================ */
 
 /* ---- Google Fonts ---- */
@@ -8,42 +8,41 @@
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
 /* ---- CSS Custom Properties (Design Tokens) ---- */
-:root {
-    /* Surface / Background Hierarchy */
-    --surface: #0b1326;
-    --surface-dim: #0b1326;
-    --surface-bright: #31394d;
-    --surface-container-lowest: #060e20;
-    --surface-container-low: #131b2e;
-    --surface-container: #171f33;
-    --surface-container-high: #222a3d;
-    --surface-container-highest: #2d3449;
-    --surface-variant: #2d3449;
+:root {    /* Matte Charcoal Palette (Image-Based) */
+    --surface: #151515;
+    --surface-dim: #111111;
+    --surface-bright: #1c1c1c;
+    --surface-container-lowest: #0a0a0a;
+    --surface-container-low: #1c1c1c;
+    --surface-container: #1e1e1e;
+    --surface-container-high: #262626;
+    --surface-container-highest: #333333;
+    --surface-variant: #2b2b2b;
 
     /* On-Surface */
-    --on-surface: #dae2fd;
-    --on-surface-variant: #c7c4d8;
-    --inverse-surface: #dae2fd;
-    --inverse-on-surface: #283044;
+    --on-surface: #eaeaea;
+    --on-surface-variant: #a0a0a0;
+    --inverse-surface: #eaeaea;
+    --inverse-on-surface: #151515;
 
-    /* Primary */
-    --primary: #c3c0ff;
-    --on-primary: #1d00a5;
-    --primary-container: #4f46e5;
-    --on-primary-container: #dad7ff;
-    --inverse-primary: #4d44e3;
+    /* Primary (Mint Green / Pale Teal) */
+    --primary: #b2dac8;
+    --on-primary: #151515;
+    --primary-container: #b2dac8;
+    --on-primary-container: #151515;
+    --primary-glow: none;
 
-    /* Secondary */
-    --secondary: #c0c1ff;
-    --on-secondary: #1000a9;
-    --secondary-container: #3131c0;
-    --on-secondary-container: #b0b2ff;
+    /* Secondary (Darker Teal Accent) */
+    --secondary: #2b4a45;
+    --on-secondary: #ffffff;
+    --secondary-container: #2b4a45;
+    --on-secondary-container: #b2dac8;
 
-    /* Tertiary (Success Green) */
-    --tertiary: #4ae176;
-    --on-tertiary: #003915;
-    --tertiary-container: #007030;
-    --on-tertiary-container: #63f889;
+    /* Tertiary (Warm Accent) */
+    --tertiary: #ffb869;
+    --on-tertiary: #482900;
+    --tertiary-container: #ca801e;
+    --on-tertiary-container: #3f2300;
 
     /* Error */
     --error: #ffb4ab;
@@ -52,8 +51,8 @@
     --on-error-container: #ffdad6;
 
     /* Outline */
-    --outline: #918fa1;
-    --outline-variant: #464555;
+    --outline: #333333;
+    --outline-variant: #2b2b2b;
 
     /* Spacing (8px base) */
     --sp-xs: 4px;
@@ -76,8 +75,8 @@
 
     /* Transitions */
     --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-smooth: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-smooth: 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ---- Reset & Base ---- */
@@ -97,6 +96,10 @@ html {
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background-color: var(--surface);
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.08), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.08), transparent 25%);
+    background-attachment: fixed;
     color: var(--on-surface);
     line-height: 1.5;
     overflow-x: hidden;
@@ -196,17 +199,19 @@ a {
 /* ---- Sidebar ---- */
 .sidebar {
     position: fixed;
-    left: 0;
-    top: 0;
+    left: 16px;
+    top: 16px;
+    bottom: 16px;
     width: 256px;
-    height: 100vh;
+    height: calc(100vh - 32px);
     background: var(--surface-container-low);
-    border-right: 1px solid rgba(70, 69, 85, 0.1);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-xl);
     padding: 16px;
     display: flex;
     flex-direction: column;
     z-index: 50;
-    transition: transform var(--transition-smooth);
+    transition: all var(--transition-smooth);
 }
 
 .sidebar-brand {
@@ -270,12 +275,14 @@ a {
 }
 
 .nav-item.active {
-    background: var(--primary-container);
-    color: var(--on-primary-container);
+    background: var(--surface-container);
+    color: var(--on-surface);
+    border-left: 3px solid var(--primary);
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 .nav-item.active .material-symbols-outlined {
-    color: var(--on-primary-container);
+    color: var(--primary);
 }
 
 .nav-item:active {
@@ -293,11 +300,12 @@ a {
 
 /* ---- Main Content ---- */
 .main-content {
-    margin-left: 256px;
+    margin-left: 288px;
     flex: 1;
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    transition: margin-left var(--transition-smooth);
 }
 
 /* ---- Top Nav ---- */
@@ -310,10 +318,10 @@ a {
     align-items: center;
     justify-content: space-between;
     padding: 0 var(--sp-margin);
-    background: rgba(11, 19, 38, 0.8);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid rgba(70, 69, 85, 0.1);
+    background: var(--surface-container-low);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-bottom: 1px solid var(--outline-variant);
 }
 
 .topnav-left {
@@ -356,7 +364,8 @@ a {
 
 .topnav-search input:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+    box-shadow: var(--primary-glow);
+    background: var(--surface-container);
 }
 
 .topnav-search input::placeholder {
@@ -438,18 +447,20 @@ a {
    COMPONENTS
    ============================================================ */
 
-/* ---- Glassmorphic Card ---- */
-.academic-glass {
-    background: rgba(30, 41, 59, 0.4);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+/* ---- Matte Card ---- */
+.academic-glass, .glass-panel {
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
     border-radius: var(--radius-xl);
     transition: all var(--transition-smooth);
+    box-shadow: none;
 }
 
-.academic-glass:hover {
-    background: rgba(45, 52, 73, 0.3);
+.academic-glass:hover, .glass-panel:hover {
+    background: var(--surface-container-high);
+    border-color: var(--outline);
+    transform: translateY(-2px);
+    box-shadow: none;
 }
 
 /* ---- Stat Card ---- */
@@ -595,24 +606,27 @@ a {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 8px var(--sp-md);
+    padding: 10px var(--sp-md);
     background: var(--primary-container);
     color: var(--on-primary-container);
     border: none;
     border-radius: var(--radius-lg);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
     cursor: pointer;
     transition: all var(--transition-normal);
+    box-shadow: none;
 }
 
 .btn-primary:hover {
-    filter: brightness(1.1);
+    background: #c2eed5; /* Slightly lighter mint */
+    transform: scale(1.02);
 }
 
 .btn-primary:active {
-    transform: scale(0.95);
+    transform: scale(0.98);
+    box-shadow: none;
 }
 
 .btn-secondary {
@@ -620,24 +634,30 @@ a {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 8px var(--sp-md);
-    background: transparent;
+    padding: 10px var(--sp-md);
+    background: var(--surface-container);
     color: var(--on-surface);
-    border: 1px solid rgba(70, 69, 85, 0.2);
+    border: 1px solid var(--outline-variant);
     border-radius: var(--radius-lg);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.02em;
     cursor: pointer;
     transition: all var(--transition-normal);
+    backdrop-filter: blur(8px);
 }
 
 .btn-secondary:hover {
-    background: rgba(45, 52, 73, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+    border-color: var(--outline);
+    transform: scale(1.02);
+    box-shadow: none;
 }
 
 .btn-secondary:active {
-    transform: scale(0.95);
+    transform: scale(0.98);
+    box-shadow: none;
 }
 
 .btn-icon {
@@ -1430,4 +1450,53 @@ a {
     .file-type-badges {
         gap: 12px;
     }
+}
+
+/* ---- Micro-Animations ---- */
+.animate-fade-in {
+    animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ---- Sidebar State Toggles ---- */
+#mobile-menu-btn {
+    display: none;
+}
+
+body.sidebar-collapsed .sidebar {
+    transform: translateX(-150%);
+}
+
+body.sidebar-collapsed .main-content {
+    margin-left: 0;
+}
+
+body.sidebar-collapsed #mobile-menu-btn {
+    display: block;
+}
+
+body.mobile-view .sidebar {
+    transform: translateX(-150%);
+}
+
+body.mobile-view.sidebar-collapsed .sidebar {
+    transform: translateX(0);
+}
+
+body.mobile-view .main-content {
+    margin-left: 0;
+}
+
+body.mobile-view #mobile-menu-btn {
+    display: block;
 }

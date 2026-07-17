@@ -17,7 +17,7 @@ from backend.schemas import (
 from utils.logger import logger
 
 # Import models/rag service endpoints (stubs for now)
-from models.llm_connector import get_installed_ollama_models, check_ollama_status
+from services.gemini_client import gemini_client
 from rag.qa_service import answer_question
 from rag.summarizer import generate_paper_summary
 from rag.extractions import generate_quiz, generate_flashcards, detect_research_gaps
@@ -33,8 +33,8 @@ async def get_system_status():
         gpu_available = torch.cuda.is_available()
         gpu_name = torch.cuda.get_device_name(0) if gpu_available else None
         
-        ollama_running = check_ollama_status()
-        ollama_models = get_installed_ollama_models() if ollama_running else []
+        provider_status = "Connected" if gemini_client.is_configured() else "Not Configured"
+        current_model = settings.MODEL_NAME
         
         papers_count = len(db.list_papers())
         
@@ -47,8 +47,8 @@ async def get_system_status():
             debug=settings.DEBUG,
             gpu_available=gpu_available,
             gpu_device_name=gpu_name,
-            ollama_running=ollama_running,
-            ollama_models=ollama_models,
+            provider_status=provider_status,
+            current_model=current_model,
             total_papers=papers_count,
             db_size_bytes=db_size
         )
@@ -69,7 +69,7 @@ async def ask_question_endpoint(req: QARequest):
         db.add_search_history(req.question)
         
         # Determine LLM model to use
-        llm_model = req.llm_model or settings.DEFAULT_LLM_MODEL
+        llm_model = req.llm_model or settings.MODEL_NAME
         
         # Answer question
         qa_result = answer_question(
@@ -130,7 +130,7 @@ async def generate_summary_endpoint(req: SummaryRequest):
             )
             
         # Cache Miss: Generate summary
-        llm_model = req.llm_model or settings.DEFAULT_LLM_MODEL
+        llm_model = req.llm_model or settings.MODEL_NAME
         summary_text = generate_paper_summary(req.paper_id, req.summary_type, llm_model)
         
         # Store in cache

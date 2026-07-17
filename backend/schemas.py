@@ -8,8 +8,8 @@ class SystemStatusResponse(BaseModel):
     debug: bool
     gpu_available: bool
     gpu_device_name: Optional[str] = None
-    ollama_running: bool
-    ollama_models: List[str]
+    provider_status: str
+    current_model: str
     total_papers: int
     db_size_bytes: int
 

@@ -1,1 +1,1 @@
-"""Frontend package for PaperMind AI. Holds Streamlit pages and assets."""
+"""Frontend package for Lumina Ai. Holds Streamlit pages and assets."""

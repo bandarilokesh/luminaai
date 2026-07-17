@@ -1,1 +1,1 @@
-"""Backend API package for PaperMind AI. Holds FastAPI application and controllers."""
+"""Backend API package for Lumina Ai. Holds FastAPI application and controllers."""

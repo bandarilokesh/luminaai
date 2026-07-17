@@ -15,7 +15,7 @@ class SystemStatsFilter(logging.Filter):
         record.memory_usage_mb = memory_info.rss / (1024 * 1024)
         return True
 
-def setup_logger(name: str = "papermind") -> logging.Logger:
+def setup_logger(name: str = "lumina_ai") -> logging.Logger:
     """Sets up a structured rotating file and console logger with performance diagnostics."""
     logger = logging.getLogger(name)
     

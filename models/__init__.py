@@ -1,1 +1,1 @@
-"""Model interface package for PaperMind AI. Manages local LLM connectors and prompt templates."""
+"""Model interface package for Lumina Ai. Manages local LLM connectors and prompt templates."""

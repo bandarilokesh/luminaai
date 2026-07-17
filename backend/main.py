@@ -17,13 +17,13 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle event handler for FastAPI."""
-    logger.info("Starting PaperMind AI Backend API...")
+    logger.info("Starting Lumina Ai Backend API...")
     # Initialize settings directories
     settings.create_directories()
     # Log database details
     logger.info(f"Database loaded at: {settings.DATABASE_PATH}")
     yield
-    logger.info("Shutting down PaperMind AI Backend API...")
+    logger.info("Shutting down Lumina Ai Backend API...")
 
 app = FastAPI(
     title=settings.APP_NAME,

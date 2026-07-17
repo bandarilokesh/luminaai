@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     # App General Settings
-    APP_NAME: str = "PaperMind AI"
+    APP_NAME: str = "Lumina Ai"
     DEBUG: bool = False
     
     # Path Configurations
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     DATABASE_DIR: Path = BASE_DIR / "database"
     
     # Database Settings
-    DATABASE_PATH: Path = BASE_DIR / "database" / "papermind.db"
+    DATABASE_PATH: Path = BASE_DIR / "database" / "lumina_ai.db"
     
     # RAG Chunking Parameters
     CHUNK_SIZE: int = 700  # Target size in tokens (between 500 and 900)
@@ -48,11 +48,12 @@ class Settings(BaseSettings):
     HYBRID_ALPHA: float = 0.5  # Fusion weight (0.0 = pure BM25, 1.0 = pure dense)
     RERANK_TOP_N: int = 3
     
-    # Local LLM Configurations (Ollama)
-    OLLAMA_API_BASE: str = "http://localhost:11434"
-    DEFAULT_LLM_MODEL: str = "llama3.2"  # Alternatives: qwen2.5, gemma2, mistral
-    LLM_TEMPERATURE: float = 0.0  # Keep low to avoid hallucination
-    LLM_MAX_TOKENS: int = 1024
+    # Gemini API Configurations
+    GEMINI_API_KEY: str = ""
+    LLM_PROVIDER: str = "gemini"
+    MODEL_NAME: str = "gemini-flash-lite-latest"
+    TEMPERATURE: float = 0.2
+    MAX_TOKENS: int = 1024
     
     # UI / Security Settings
     MAX_UPLOAD_SIZE_MB: int = 50

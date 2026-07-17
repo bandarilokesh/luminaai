@@ -34,7 +34,7 @@ class VectorStoreManager:
         """Get or create the unified papers collection in ChromaDB."""
         client = self._get_chroma_client()
         return client.get_or_create_collection(
-            name="papermind_chunks",
+            name="lumina_ai_chunks",
             metadata={"hnsw:space": "cosine"} # Use cosine similarity
         )
 

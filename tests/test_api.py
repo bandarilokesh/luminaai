@@ -7,7 +7,7 @@ client = TestClient(app)
 def test_health_check_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "service": "PaperMind AI"}
+    assert response.json() == {"status": "healthy", "service": "Lumina Ai"}
 
 def test_system_status_endpoint():
     response = client.get("/api/status")
@@ -15,7 +15,7 @@ def test_system_status_endpoint():
     data = response.json()
     assert "app_name" in data
     assert "gpu_available" in data
-    assert "ollama_running" in data
+    assert "provider_status" in data
     assert "total_papers" in data
 
 def test_list_papers_endpoint():

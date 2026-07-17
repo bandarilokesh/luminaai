@@ -1,5 +1,5 @@
 /* ============================================================
-   PaperMind AI — SPA Application Controller
+   Lumina Ai — SPA Application Controller
    ============================================================ */
 
 const API_BASE = '/api';
@@ -108,9 +108,14 @@ function renderPage() {
         qa: 'QA Sessions', summary: 'Summaries', 'study-tools': 'Study Tools',
         'research-gaps': 'Research Gaps', settings: 'Settings'
     };
-    document.getElementById('topnav-title').textContent = titles[page] || 'PaperMind';
+    document.getElementById('topnav-title').textContent = titles[page] || 'Lumina Ai';
 
     container.innerHTML = '<div style="display:flex;justify-content:center;padding:80px 0;"><div class="spinner"></div></div>';
+
+    // Trigger fade-in animation
+    container.classList.remove('animate-fade-in');
+    void container.offsetWidth; // Force reflow
+    container.classList.add('animate-fade-in');
 
     const renderers = {
         dashboard: renderDashboard,
@@ -199,11 +204,11 @@ async function renderDashboard(el) {
                                 ${status.gpu_device_name ? `<div class="label-sm text-muted" style="margin-top:4px;">${escapeHtml(status.gpu_device_name)}</div>` : ''}
                             </div>
                             <div>
-                                <div class="label-md text-muted" style="margin-bottom:4px;">OLLAMA</div>
+                                <div class="label-md text-muted" style="margin-bottom:4px;">Gemini API</div>
                                 <div class="body-sm" style="color:var(--on-surface);">
-                                    ${status.ollama_running ? `<span style="color:var(--tertiary);">● Running</span>` : `<span style="color:var(--error);">● Stopped</span>`}
+                                    ${status.provider_status === 'Connected' ? `<span style="color:var(--tertiary);">● Connected</span>` : `<span style="color:var(--error);">● Not Configured</span>`}
                                 </div>
-                                ${status.ollama_models?.length ? `<div class="label-sm text-muted" style="margin-top:4px;">${status.ollama_models.join(', ')}</div>` : ''}
+                                ${status.current_model ? `<div class="label-sm text-muted" style="margin-top:4px;">${status.current_model}</div>` : ''}
                             </div>
                             <div>
                                 <div class="label-md text-muted" style="margin-bottom:4px;">DATABASE</div>
@@ -979,12 +984,12 @@ async function renderSettings(el) {
                     ${status.gpu_device_name ? `<div class="label-sm text-muted">${escapeHtml(status.gpu_device_name)}</div>` : ''}
                 </div>
                 <div>
-                    <div class="label-md text-muted mb-xs">OLLAMA</div>
-                    <div class="body-sm">${status.ollama_running ? `<span style="color:var(--tertiary);">● Running</span>` : `<span style="color:var(--error);">● Stopped</span>`}</div>
+                    <div class="label-md text-muted mb-xs">Gemini API</div>
+                    <div class="body-sm">${status.provider_status === 'Connected' ? `<span style="color:var(--tertiary);">● Connected</span>` : `<span style="color:var(--error);">● Not Configured</span>`}</div>
                 </div>
                 <div>
-                    <div class="label-md text-muted mb-xs">MODELS</div>
-                    <div class="body-sm">${status.ollama_models?.join(', ') || 'None'}</div>
+                    <div class="label-md text-muted mb-xs">MODEL</div>
+                    <div class="body-sm">${status.current_model || 'None'}</div>
                 </div>
                 <div>
                     <div class="label-md text-muted mb-xs">DATABASE</div>
