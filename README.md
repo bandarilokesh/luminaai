@@ -1,93 +1,132 @@
-# Lumina Ai: Local RAG Research Paper Summarizer & QA Assistant
+# Lumina AI 🧠
 
-An enterprise-grade desktop application designed for indexing, reading, summarizing, and testing comprehension of research papers. It uses Gemini API for fast LLM inference.
-
----
-
-## Key Features
-
-- **Local PDF Processing & OCR:** Layout-aware column sorting for academic PDFs (prevents garbling of two-column articles) using PyMuPDF and pdfplumber, with pytesseract OCR fallback for scanned papers.
-- **Adaptive Heading Chunker:** Automatically splits documents based on section headings (e.g. Introduction, Methodology, Results) rather than arbitrary fixed sizes.
-- **Hybrid Dense/Sparse Retrieval:** Integrates BM25 lexical keyword search alongside SentenceTransformers vector embeddings (FAISS and ChromaDB support).
-- **Cross-Encoder Re-ranking:** Re-scores retrieved candidate context chunks using Cross-Encoder models (`cross-encoder/ms-marco-MiniLM-L-6-v2`) for premium answer precision.
-- **Factual citations & Guardrails:** Strict prompt templates prevent hallucinations. If context is missing, the AI returns a standard "insufficient evidence" statement. Citations list source paper name, page number, and section.
-- **Academic Study tools:** Generate study flashcards, interactive quizzes (multiple-choice or short-answers) with difficulty levels, and automatic research gap/limitation detection.
-- **Multi-Paper Analysis:** Upload and compare multiple papers at once. Compare datasets, methodologies, models, and performance metrics.
-- **Local SQLite Caching:** Speeds up operations by caching computed embeddings and generated summary brief perspectives (Abstract, Methodology, Results, Conclusion, Technical, ELI5).
+Welcome to **Lumina AI**! This is a complete, beginner-friendly guide to understanding, installing, and using your very own local Research Assistant powered by Retrieval-Augmented Generation (RAG) and Google's Gemini AI.
 
 ---
 
-## System Architecture
+## 🌟 What is Lumina AI?
 
-The project adheres to Clean Architecture principles to ensure modularity and ease of extension:
+Have you ever had to read a 30-page academic paper and wished you could just "talk" to it? That's what Lumina AI does! 
 
-- **Presentation Layer (`frontend/`):** Vanilla JS/HTML SPA dashboard, library views, interactive QA chat interface, quiz templates.
-- **Orchestration Layer (`backend/`):** FastAPI endpoints managing file upload streams, database logging, background workers, study tools requests, and serving the frontend static files.
-- **RAG Engine (`rag/`):** Column-sorting PDF reader, heading chunker, dense/sparse search mergers, and re-ranking algorithms.
-- **Infrastructure & Storage (`database/`, `cache/`):** SQLite database helper storing paper records and summaries cache; FAISS/Chroma database files saving vector index arrays.
-- **Model Interfaces (`models/`):** System prompt orchestrators and Gemini API connector (`services/gemini_client.py`).
+It is an enterprise-grade desktop web application that allows you to:
+- **Upload** complex PDF research papers.
+- **Summarize** them instantly in different styles (Abstract, ELI5, Technical).
+- **Ask Questions** and get answers directly sourced and cited from the uploaded documents.
+- **Generate Study Tools** like flashcards and multiple-choice quizzes to test your comprehension.
+
+It processes everything locally and uses the lightning-fast **Google Gemini API** to understand the text and generate intelligent responses.
 
 ---
 
-## Installation & Setup
+## 🏗️ How Does it Work? (The Architecture)
+
+Lumina AI uses a modern **Clean Architecture** to keep the code organized and easy to understand:
+
+1. **The Frontend (UI):** Built entirely with pure HTML, CSS, and JavaScript. It features a trendy, matte, image-based design system with a floating sidebar and dynamic content rendering. No complex frameworks like React or Tailwind are required!
+2. **The Backend (API):** Powered by **FastAPI** (Python). This handles all the heavy lifting, routing your requests, and serving the beautiful user interface.
+3. **The RAG Engine:** "RAG" stands for Retrieval-Augmented Generation. When you upload a PDF, this engine reads it, breaks it down into small logical chunks, and saves those chunks into a Vector Database. When you ask a question, it searches for the most relevant chunks and sends them to the AI so the AI can answer accurately without guessing (hallucinating).
+4. **The AI Connectors:** Connects securely to Google's Gemini models using the modern `google-genai` SDK to generate summaries and answers.
+
+---
+
+## 🚀 Getting Started
+
+Follow these simple steps to get Lumina AI running on your computer.
 
 ### Prerequisites
+- **Python 3.12+** installed on your machine.
+- A **Gemini API Key**. You can get one for free from [Google AI Studio](https://aistudio.google.com/).
 
-1. **Python 3.12.x** installed.
-2. **Gemini API Key:** You need a valid Gemini API key from Google AI Studio.
-3. (Optional) **Tesseract OCR** binary installed on host system for scanned PDF OCR support.
+### Step-by-Step Installation
 
-### Local Setup
-
-1. **Clone the Repository and Navigate to Root:**
+1. **Clone the Repository:**
+   Open your terminal/command prompt and run:
    ```bash
-   cd c:\Lumina-Ai
+   git clone https://github.com/bandarilokesh/PaperMind-Ai.git
+   cd PaperMind-Ai
    ```
 
-2. **Initialize Virtual Environment & Install Dependencies:**
+2. **Create a Virtual Environment:**
+   This creates a safe, isolated space for the project's Python dependencies.
    ```bash
    python -m venv .venv
-   .venv\Scripts\pip install -r requirements.txt
    ```
 
-3. **Set Up environment Configurations:**
-   Copy `.env.example` to `.env` and configure your API key:
-   ```bash
-   copy .env.example .env
-   ```
-   Open `.env` and set `GEMINI_API_KEY=<your_api_key>`
+3. **Install Dependencies:**
+   Activate the environment and install the required packages.
+   - On **Windows**:
+     ```bash
+     .venv\Scripts\pip install -r requirements.txt
+     ```
+   - On **Mac/Linux**:
+     ```bash
+     source .venv/bin/activate
+     pip install -r requirements.txt
+     ```
 
-4. **Launch Backend API (FastAPI):**
-   ```bash
-   .venv\Scripts\uvicorn backend.main:app --reload --port 8000
-   ```
+4. **Set Up Your Environment Variables:**
+   The project needs your Gemini API key to work. 
+   - Copy the `.env.example` file and rename it to `.env`.
+   - Open the `.env` file in any text editor and paste your API key:
+     ```env
+     GEMINI_API_KEY=your_actual_api_key_here
+     ```
 
-5. **Access the Application:**
-   Open `http://localhost:8000` in your browser. The backend FastAPI server automatically serves the frontend static SPA.
+5. **Start the Application!**
+   Run the FastAPI server:
+   - On **Windows**:
+     ```bash
+     .venv\Scripts\uvicorn backend.main:app --reload --port 8000
+     ```
+   - On **Mac/Linux**:
+     ```bash
+     uvicorn backend.main:app --reload --port 8000
+     ```
+
+6. **Open the App:**
+   Open your web browser and go to **[http://localhost:8000](http://localhost:8000)**. You will see the Lumina AI dashboard!
 
 ---
 
-## Running inside Docker
+## 🐳 Running with Docker (Alternative)
 
-A `Dockerfile` and `docker-compose.yml` are provided to run the services in isolated containers. Ensure you pass your Gemini API key in `.env`.
-
-1. **Build and Start Container Services:**
-   ```bash
-   docker-compose up --build
-   ```
-
-2. Access the Application UI at `http://localhost:8000` and FastAPI docs at `http://localhost:8000/docs`.
-
----
-
-## Running Tests & Evaluations
-
-Run the complete test suite (unit and integration tests) using Pytest:
+If you prefer using Docker, it's incredibly easy! Just make sure your `.env` file is set up with your API key, then run:
 
 ```bash
-.venv\Scripts\pytest tests/
+docker-compose up --build
 ```
+The application will be available at `http://localhost:8000`.
 
-- **`tests/test_pdf.py`**: Validates PDF cleanup and columns-sorting reading order.
-- **`tests/test_retrieval.py`**: Verifies BM25 rank calculations, ROUGE metric functions, precision/recall MRR solvers, and citation parser validity.
-- **`tests/test_api.py`**: Integrates test clients to verify backend endpoints health and response codes.
+---
+
+## 🎨 A Tour of the Application
+
+- **Dashboard:** The main landing page. Use the "Quick Upload" button to add new PDF papers to your local library.
+- **Library:** View all the papers you have uploaded. 
+- **QA (Question & Answer):** Select a paper and ask questions about it. The AI will provide cited answers!
+- **Summary:** Get automated summaries of your papers. Choose from different perspectives like "Methodology" or "ELI5" (Explain Like I'm 5).
+- **Hide Menu:** Click the collapse button at the bottom of the sidebar to hide it and get a full-screen reading experience!
+
+---
+
+## 🛠️ Troubleshooting for Beginners
+
+- **Error: 404 models/gemini-1.5-flash is not found:** Ensure you are using the latest `google-genai` SDK and not the deprecated `google-generativeai` library. Lumina AI has already been updated to use the correct library!
+- **Port 8000 is in use:** If the server won't start because the port is busy, you can change the port by running: `uvicorn backend.main:app --reload --port 8080` (and then visit `http://localhost:8080`).
+
+---
+
+## 🧪 Running Tests
+
+To ensure everything is working correctly under the hood, you can run the automated test suite:
+
+- On **Windows**:
+  ```bash
+  .venv\Scripts\pytest tests/
+  ```
+- On **Mac/Linux**:
+  ```bash
+  pytest tests/
+  ```
+
+Happy Researching! 📚✨

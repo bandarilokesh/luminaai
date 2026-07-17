@@ -113,11 +113,11 @@ body {
 
 /* ---- Typography ---- */
 h1, h2, h3, h4, h5, h6, .headline {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
 }
 
 .headline-xl {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 48px;
     font-weight: 700;
     line-height: 56px;
@@ -125,7 +125,7 @@ h1, h2, h3, h4, h5, h6, .headline {
 }
 
 .headline-lg {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 32px;
     font-weight: 600;
     line-height: 40px;
@@ -133,7 +133,7 @@ h1, h2, h3, h4, h5, h6, .headline {
 }
 
 .headline-md {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 20px;
     font-weight: 600;
     line-height: 28px;
@@ -230,7 +230,7 @@ a {
 }
 
 .sidebar-brand-text .brand-name {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 20px;
     font-weight: 700;
     color: var(--primary);
@@ -331,7 +331,7 @@ a {
 }
 
 .topnav-title {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 20px;
     font-weight: 700;
     color: var(--primary);
@@ -474,7 +474,7 @@ a {
 }
 
 .stat-card .stat-value {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 32px;
     font-weight: 600;
     line-height: 40px;
@@ -509,7 +509,7 @@ a {
 }
 
 .paper-card .paper-title {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 20px;
     font-weight: 600;
     line-height: 28px;
@@ -1111,7 +1111,7 @@ a {
     color: #f8fafc;
     font-size: 20px;
     font-weight: 500;
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Inter', sans-serif;
 }
 
 .flashcard-explanation {
