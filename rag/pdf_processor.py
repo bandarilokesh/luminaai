@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Tuple, List
 import fitz  # PyMuPDF
@@ -6,6 +7,8 @@ import pdfplumber
 from PIL import Image
 import io
 from utils.logger import logger
+from pipeline.table_extractor import extract_tables_from_pdf
+from pipeline.section_classifier import SectionClassifier
 
 # Try loading pytesseract, handle import/binary absence gracefully
 PYTESSERACT_AVAILABLE = False
@@ -141,6 +144,14 @@ def extract_pdf_data(file_path: Path) -> Tuple[Dict[str, Any], str]:
         
     full_text = "\n\n--- PAGE SPLIT ---\n\n".join(full_text_list)
     
+    # Also extract tables and append to full text for chunker to pick up
+    tables = extract_tables_from_pdf(file_path)
+    if tables:
+        table_text = "\n\n--- TABLES ---\n\n"
+        for tbl in tables:
+            table_text += f"\nTable {tbl['table_index']} (Page {tbl['page']}):\n{tbl['markdown']}\n"
+        full_text += table_text
+    
     # 2. Extract Metadata details (Heuristics)
     first_page_text = full_text_list[0] if full_text_list else ""
     
@@ -255,31 +266,15 @@ def extract_pdf_sections(file_path: Path) -> List[Dict[str, Any]]:
     """
     doc = fitz.open(str(file_path))
     sections = []
-    
-    # Common section patterns
-    section_regex = re.compile(
-        r'^(?:[IVXLCDM]+\.?\s+|[0-9]+(?:\.[0-9]+)*\.?\s+|Abstract|Keywords|References|Acknowledge?ments)\b.*',
-        re.IGNORECASE
-    )
+    classifier = SectionClassifier()
     
     for page_num in range(len(doc)):
         page = doc[page_num]
         blocks = page.get_text("blocks")
         sorted_blocks = sort_blocks_by_layout(blocks)
         
-        for b in sorted_blocks:
-            line = b[4].strip()
-            # If line matches section heading structure and is short (typically < 100 characters)
-            if len(line) < 100 and section_regex.match(line):
-                # Split multiple lines inside block
-                lines = [l.strip() for l in line.split("\n") if l.strip()]
-                for l in lines:
-                    if section_regex.match(l):
-                        sections.append({
-                            "heading": l,
-                            "page": page_num + 1,
-                            "bbox": (b[0], b[1], b[2], b[3])
-                        })
+        page_sections = classifier.classify_sections(sorted_blocks, page_num)
+        sections.extend(page_sections)
                         
     doc.close()
     return sections

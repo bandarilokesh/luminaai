@@ -81,5 +81,42 @@ class GeminiClient:
             logger.error(f"Unexpected error when communicating with Gemini (Duration: {duration:.2f}s): {str(e)}")
             raise Exception(f"Failed to communicate with Gemini backend: {str(e)}") from e
 
+    def generate_chat_stream(
+        self,
+        prompt: str,
+        model_name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ):
+        """Streams a response from Gemini API."""
+        if not self.is_configured():
+            yield "Error: Gemini API Key is not configured."
+            return
+            
+        model_id = model_name or settings.MODEL_NAME
+        temp = temperature if temperature is not None else settings.TEMPERATURE
+        max_tok = max_tokens if max_tokens is not None else settings.MAX_TOKENS
+        
+        try:
+            config = types.GenerateContentConfig(
+                temperature=temp,
+                max_output_tokens=max_tok,
+                system_instruction=system_prompt,
+            )
+            
+            response = self.client.models.generate_content_stream(
+                model=model_id,
+                contents=prompt,
+                config=config,
+            )
+            
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            logger.error(f"Error in stream: {str(e)}")
+            yield f"\n[Error generating response: {str(e)}]"
+
 # Instantiate singleton client
 gemini_client = GeminiClient()

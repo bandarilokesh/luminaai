@@ -6,9 +6,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import faiss
 import chromadb
+import pickle
+import re
 from config.settings import settings
 from utils.logger import logger
 from rag.embeddings import embeddings_pipeline
+from rank_bm25 import BM25Okapi
 
 class VectorStoreManager:
     """Manages local vector store backends (FAISS & ChromaDB) under a unified interface."""
@@ -22,6 +25,36 @@ class VectorStoreManager:
         
         self.chroma_dir = self.vector_db_dir / "chroma"
         self._chroma_client = None
+
+        self.bm25_dir = self.vector_db_dir / "bm25"
+        self.bm25_dir.mkdir(parents=True, exist_ok=True)
+
+    def _tokenize_text(self, text: str) -> List[str]:
+        """Simple alphanumeric tokenizer for BM25."""
+        return re.findall(r'\b\w+\b', text.lower())
+
+    def _save_bm25_index(self, paper_id: str, chunks: List[Dict[str, Any]]):
+        """Build and save BM25 index for a paper."""
+        try:
+            corpus = [self._tokenize_text(c["text"]) for c in chunks]
+            bm25 = BM25Okapi(corpus)
+            bm25_file = self.bm25_dir / f"{paper_id}.pkl"
+            with open(bm25_file, "wb") as f:
+                pickle.dump(bm25, f)
+            logger.info(f"BM25 index saved for paper: {paper_id}")
+        except Exception as e:
+            logger.error(f"Failed to save BM25 index for {paper_id}: {str(e)}")
+
+    def load_bm25_index(self, paper_id: str) -> Optional[BM25Okapi]:
+        """Load BM25 index for a paper."""
+        bm25_file = self.bm25_dir / f"{paper_id}.pkl"
+        if bm25_file.exists():
+            try:
+                with open(bm25_file, "rb") as f:
+                    return pickle.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load BM25 index for {paper_id}: {str(e)}")
+        return None
 
     def _get_chroma_client(self) -> chromadb.PersistentClient:
         """Lazily initialize ChromaDB Persistent Client."""
@@ -151,9 +184,14 @@ class VectorStoreManager:
             embeddings = embeddings_pipeline.get_embeddings(texts)
             
             if settings.DEFAULT_VECTOR_DB == "faiss":
-                return self.index_chunks_faiss(paper_id, chunks, embeddings)
+                success = self.index_chunks_faiss(paper_id, chunks, embeddings)
             else:
-                return self.index_chunks_chroma(paper_id, chunks, embeddings)
+                success = self.index_chunks_chroma(paper_id, chunks, embeddings)
+                
+            if success:
+                self._save_bm25_index(paper_id, chunks)
+                
+            return success
                 
         except Exception as e:
             logger.error(f"Failed unified vector indexing: {str(e)}", exc_info=True)
@@ -174,6 +212,12 @@ class VectorStoreManager:
                 collection = self._get_chroma_collection()
                 collection.delete(where={"paper_id": paper_id})
                 logger.info(f"Deleted ChromaDB records for paper: {paper_id}")
+                
+            # 3. Clean BM25 index
+            bm25_file = self.bm25_dir / f"{paper_id}.pkl"
+            if bm25_file.exists():
+                bm25_file.unlink()
+                logger.info(f"Deleted BM25 index for paper: {paper_id}")
                 
             return True
         except Exception as e:

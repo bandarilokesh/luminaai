@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 100  # Overlap in tokens (between 80 and 120)
     
     # Embeddings Configurations
-    DEFAULT_EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    DEFAULT_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
     AVAILABLE_EMBEDDING_MODELS: dict = {
         "BAAI/bge-small-en-v1.5": "BGE Small English (Fast, 384d)",
         "BAAI/bge-base-en-v1.5": "BGE Base English (Balanced, 768d)",
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     }
     
     # Re-ranking Configurations
-    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANK_MODEL: str = "BAAI/bge-reranker-v2-m3"
     USE_RERANKER: bool = True
     
     # Vector Database Settings
@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     MODEL_NAME: str = "gemini-flash-lite-latest"
     TEMPERATURE: float = 0.2
     MAX_TOKENS: int = 1024
+    
+    # Ollama Configurations
+    OLLAMA_API_URL: str = "http://localhost:11434"
     
     # UI / Security Settings
     MAX_UPLOAD_SIZE_MB: int = 50

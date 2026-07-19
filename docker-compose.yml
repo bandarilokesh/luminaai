@@ -14,6 +14,7 @@ services:
       - MODEL_NAME=${MODEL_NAME:-gemini-flash-lite-latest}
       - TEMPERATURE=${TEMPERATURE:-0.2}
       - MAX_TOKENS=${MAX_TOKENS:-1024}
+      - OLLAMA_API_URL=http://ollama:11434
     volumes:
       - ./uploads:/app/uploads
       - ./cache:/app/cache
@@ -23,4 +24,11 @@ services:
       - "host.docker.internal:host-gateway"
     restart: always
 
-
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lumina-ai-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: always

@@ -1,3 +1,4 @@
+import json
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -57,6 +58,8 @@ class QAResponse(BaseModel):
     answer: str
     citations: List[CitationItem]
     confidence_score: float
+    faithfulness_score: Optional[float] = 0.0
+    verification_json: Optional[Dict[str, Any]] = {}
     retrieved_chunk_ids: List[str]
     latency_sec: float
 
@@ -77,7 +80,7 @@ class QuizItem(BaseModel):
     question: str
     options: Optional[List[str]] = Field(None, description="Options for MCQs (e.g. A, B, C, D)")
     answer: str = Field(..., description="Correct answer")
-    explanation: Optional[str] = Field(None, description="Explanation why the answer is correct")
+    explanation: Optional[str] = None
 
 class QuizRequest(BaseModel):
     paper_ids: List[str]
@@ -122,5 +125,14 @@ class ActivityResponse(BaseModel):
 
 # --- Research Gap schemas ---
 class ResearchGapResponse(BaseModel):
-    gaps: List[Dict[str, Any]] = Field(..., description="Identified limitations, conflicts, future work and opportunities")
+    gaps: List[Dict[str, Any]]
+    latency_sec: float
+
+class GraphResponse(BaseModel):
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+    latency_sec: float
+
+class CompareResponse(BaseModel):
+    comparison_markdown: str
     latency_sec: float

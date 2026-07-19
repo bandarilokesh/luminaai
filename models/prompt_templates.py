@@ -8,8 +8,15 @@ INSTRUCTIONS:
 1. Base your answer solely on the retrieved context below. Do NOT invent, assume, or extrapolate any information.
 2. If the context does not contain sufficient evidence to answer the question, reply EXACTLY with:
    "I cannot find sufficient evidence in the uploaded paper."
-3. If you can answer the question, always cite the source paper name, page number, and section for each claim you make. Format your citations inline as `[Paper Name, Page X, Section Y]`.
+3. Cite the source block for each factual claim using the format [Block X].
 4. Keep the answer structured, professional, and technical.
+5. FORMATTING: Output ONLY clean plain text. Do NOT use any Markdown formatting whatsoever. No hashtags (#), no asterisks (*), no bold/italic markers, no table pipes (|), no horizontal rules (---), no backticks, no bullet symbols. Use plain numbered lists (1. 2. 3.) or simple dashes (-) for lists if needed.
+
+SELF-ASSESSMENT (Self-RAG):
+For every claim you make, you must ensure it is either:
+- [SUPPORTED]: Directly stated in the context blocks.
+- [INFERRED]: Logically follows from the context blocks.
+Do NOT include any claims that are [UNSUPPORTED] (not found in context).
 """
 
 QA_USER_TEMPLATE = """CONTEXT BLOCKS:
@@ -24,26 +31,32 @@ Factual, citation-aware answer:"""
 SUMMARY_PROMPTS = {
     "abstract": """You are an expert Research Scientist. Generate a concise, high-level summary of the Abstract of this research paper.
 Describe the core problem, the proposed solution, and main findings. Keep it under 250 words.
+FORMATTING: Output ONLY clean plain text. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
     "methodology": """Analyze the research methodology from the text. Summarize the experiments, algorithms, datasets, math equations, and training processes used by the authors.
+FORMATTING: Output ONLY clean plain text. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
     "results": """Analyze the results and discussion from the text. Summarize the main metrics achieved, baseline comparisons, figures/tables descriptions (if mentioned), and performance gains.
+FORMATTING: Output ONLY clean plain text. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
     "conclusion": """Summarize the conclusion of the paper. Highlight the contributions, limitations acknowledged by the authors, and future research directions.
+FORMATTING: Output ONLY clean plain text. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
     "beginner": """Explain this paper to a beginner (ELI5 style). Avoid dense academic jargon. Use analogies and simple language to explain the core contribution, why it matters, and what the authors achieved.
+FORMATTING: Output ONLY clean plain text. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
     "technical": """Generate an in-depth, rigorous technical brief of this paper. Detail the mathematical formulations, architecture parameters, optimizers, learning rates, loss functions, and exact hardware specs if mentioned.
+FORMATTING: Output ONLY clean plain text. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
@@ -53,10 +66,12 @@ PAPER TEXT:
 - Key Methodology Details
 - Key Results & Metrics
 - Notable Future Work
+FORMATTING: Output ONLY clean plain text. Use simple dashes (-) for bullet points. No Markdown, no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}""",
 
-    "one-page": """Generate a comprehensive one-page executive brief of the paper in clean Markdown layout. Include sections for Overview, Key Methods, Results, and Analysis.
+    "one-page": """Generate a comprehensive one-page executive brief of the paper. Include sections for Overview, Key Methods, Results, and Analysis.
+FORMATTING: Output ONLY clean plain text. Use simple section labels (e.g. "Overview:") instead of Markdown headings. No hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks.
 PAPER TEXT:
 {text}"""
 }

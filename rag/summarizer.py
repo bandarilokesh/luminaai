@@ -93,7 +93,7 @@ def generate_paper_summary(paper_id: str, summary_type: str, model_name: str) ->
     formatted_prompt = prompt_template.format(text=context_text)
     
     # 4. Query local LLM
-    system_instruction = "You are a professional research scientist. Generate a factual, citation-backed, clear summary brief based ONLY on the provided text."
+    system_instruction = "You are a professional research scientist. Generate a factual, citation-backed, clear summary brief based ONLY on the provided text. Output ONLY clean plain text. Do NOT use any Markdown formatting: no hashtags (#), no asterisks (*), no bold/italic, no tables, no horizontal rules (---), no backticks."
     summary_result = query_llm(
         prompt=formatted_prompt,
         model_name=model_name,

@@ -134,6 +134,11 @@ class EmbeddingsPipeline:
     def get_query_embedding(self, query: str, model_name: str = None) -> List[float]:
         """Encodes a single query (no caching for search queries to save space)."""
         model_name = model_name or settings.DEFAULT_EMBEDDING_MODEL
+        
+        # BGE models require an instruction prefix for queries to achieve optimal performance
+        if "bge" in model_name.lower():
+            query = f"Represent this sentence for retrieving relevant passages: {query}"
+            
         self._load_model(model_name)
         emb = self.model.encode(query, show_progress_bar=False, convert_to_numpy=True)
         return emb.tolist()

@@ -11,8 +11,9 @@ from utils.logger import logger
 
 # Import RAG steps (stubs for now)
 from rag.pdf_processor import extract_pdf_data
-from rag.chunker import chunk_document
+from rag.chunker import hierarchical_chunker
 from rag.vector_store import index_paper_chunks, delete_paper_from_vector_store
+from knowledge.knowledge_extractor import extract_structured_knowledge
 
 router = APIRouter(prefix="/papers", tags=["Papers"])
 
@@ -39,12 +40,20 @@ def run_indexing_pipeline(paper_id: str, file_path: Path):
         # 2. Chunking
         paper_record = db.get_paper(paper_id)
         paper_name = paper_record["title"] if paper_record else file_path.name
-        chunks = chunk_document(paper_id, paper_name, full_text, metadata)
+        chunks = hierarchical_chunker.chunk_document(full_text, paper_id, metadata)
         
         # 3. Vector indexing
         index_success = index_paper_chunks(paper_id, chunks)
         if not index_success:
             raise Exception("Failed to index chunks in the vector database.")
+        
+        # 4. Extract structured knowledge for Knowledge Graph
+        try:
+            logger.info(f"Extracting structured knowledge for paper: {paper_id}")
+            extract_structured_knowledge(paper_id, full_text)
+            logger.info(f"Structured knowledge extracted for paper: {paper_id}")
+        except Exception as ke:
+            logger.warning(f"Knowledge extraction failed for {paper_id} (non-fatal): {ke}")
             
         db.update_paper_status(paper_id, "completed")
         logger.info(f"Indexing pipeline completed successfully for paper: {paper_id}")

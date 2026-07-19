@@ -11,10 +11,11 @@ Have you ever had to read a 30-page academic paper and wished you could just "ta
 It is an enterprise-grade desktop web application that allows you to:
 - **Upload** complex PDF research papers.
 - **Summarize** them instantly in different styles (Abstract, ELI5, Technical).
-- **Ask Questions** and get answers directly sourced and cited from the uploaded documents.
+- **Ask Questions** and get answers directly sourced and cited from the uploaded documents, verified against hallucinations.
 - **Generate Study Tools** like flashcards and multiple-choice quizzes to test your comprehension.
-
-It processes everything locally and uses the lightning-fast **Google Gemini API** to understand the text and generate intelligent responses.
+- **Visualize** relationships through automatically generated Knowledge Graphs.
+- **Detect Gaps & Contradictions** across a corpus using AI Research Agents.
+- **Fully Offline Capable**: Use Google Gemini for speed, or swap to Ollama to keep everything 100% local and private.
 
 ---
 
@@ -95,7 +96,7 @@ If you prefer using Docker, it's incredibly easy! Just make sure your `.env` fil
 ```bash
 docker-compose up --build
 ```
-The application will be available at `http://localhost:8000`.
+This will start both Lumina AI and a local Ollama instance (for fully offline inference). The application will be available at `http://localhost:8000`.
 
 ---
 
@@ -105,7 +106,9 @@ The application will be available at `http://localhost:8000`.
 - **Library:** View all the papers you have uploaded. 
 - **QA (Question & Answer):** Select a paper and ask questions about it. The AI will provide cited answers!
 - **Summary:** Get automated summaries of your papers. Choose from different perspectives like "Methodology" or "ELI5" (Explain Like I'm 5).
-- **Hide Menu:** Click the collapse button at the bottom of the sidebar to hide it and get a full-screen reading experience!
+- **Knowledge Graph:** See the extracted methods, datasets, and entities mapped out across your research library.
+- **Compare Papers:** Generate a structured Markdown comparison table analyzing multiple papers side-by-side.
+- **Research Gaps:** Let the AI act as a peer reviewer to detect missing experiments and contradictions across a corpus.
 
 ---
 

@@ -85,72 +85,59 @@ def retrieve_context(query: str, paper_ids: List[str], top_k: int = 10) -> List[
     
     # 2. Sparse Lexical Search (BM25)
     sparse_results = []
-    all_chunks = get_all_chunks_for_papers(paper_ids)
+    tokenized_query = tokenize_text(query)
     
-    if all_chunks:
-        # Tokenize corpus for BM25
-        corpus = [tokenize_text(c["text"]) for c in all_chunks]
-        bm25 = BM25Okapi(corpus)
-        
-        # Tokenize query and get scores
-        tokenized_query = tokenize_text(query)
+    for p_id in paper_ids:
+        paper_chunks = get_all_chunks_for_papers([p_id])
+        if not paper_chunks:
+            continue
+            
+        bm25 = vector_store_manager.load_bm25_index(p_id)
+        if not bm25:
+            # Fallback to rebuilding if not found
+            from rank_bm25 import BM25Okapi
+            corpus = [tokenize_text(c["text"]) for c in paper_chunks]
+            bm25 = BM25Okapi(corpus)
+            
         bm25_scores = bm25.get_scores(tokenized_query)
-        
-        # Format BM25 results
         for idx, score in enumerate(bm25_scores):
             if score > 0.0:
                 sparse_results.append({
-                    "metadata": all_chunks[idx],
+                    "metadata": paper_chunks[idx],
                     "score": float(score)
                 })
-        sparse_results.sort(key=lambda x: x["score"], reverse=True)
-        sparse_results = sparse_results[:top_k * 2]
+                
+    sparse_results.sort(key=lambda x: x["score"], reverse=True)
+    sparse_results = sparse_results[:top_k * 2]
 
-    # 3. Hybrid Fusion
-    # Map both dense and sparse results into dictionaries indexed by chunk_id
-    dense_dict = {r["metadata"]["chunk_id"]: r for r in dense_results}
-    sparse_dict = {r["metadata"]["chunk_id"]: r for r in sparse_results}
-    
-    # Normalize dense scores to [0, 1]
-    if dense_results:
-        min_d = min(r["score"] for r in dense_results)
-        max_d = max(r["score"] for r in dense_results)
-        d_range = (max_d - min_d) + 1e-6
-        for r in dense_results:
-            r["norm_score"] = (r["score"] - min_d) / d_range
-    
-    # Normalize BM25 scores to [0, 1]
-    if sparse_results:
-        max_s = max(r["score"] for r in sparse_results)
-        s_range = max_s + 1e-6
-        for r in sparse_results:
-            r["norm_score"] = r["score"] / s_range
-            
-    # Combine scores using alpha parameter
+    # 3. Reciprocal Rank Fusion (RRF)
     combined_results = {}
-    alpha = settings.HYBRID_ALPHA
+    k_rrf = 60 # standard RRF constant
     
-    # Merge
-    all_chunk_ids = set(dense_dict.keys()).union(sparse_dict.keys())
-    for cid in all_chunk_ids:
-        dense_item = dense_dict.get(cid)
-        sparse_item = sparse_dict.get(cid)
-        
-        # Default metadata
-        meta = dense_item["metadata"] if dense_item else sparse_item["metadata"]
-        
-        d_score = dense_item["norm_score"] if dense_item else 0.0
-        s_score = sparse_item["norm_score"] if sparse_item else 0.0
-        
-        fused_score = alpha * d_score + (1.0 - alpha) * s_score
-        
+    # Process Dense Results
+    for rank, item in enumerate(dense_results):
+        cid = item["metadata"]["chunk_id"]
         combined_results[cid] = {
-            "metadata": meta,
-            "score": fused_score
+            "metadata": item["metadata"],
+            "rrf_score": 1.0 / (k_rrf + rank + 1),
+            "score": item["score"] # Keep highest raw score just in case
         }
         
+    # Process Sparse Results
+    for rank, item in enumerate(sparse_results):
+        cid = item["metadata"]["chunk_id"]
+        if cid in combined_results:
+            combined_results[cid]["rrf_score"] += 1.0 / (k_rrf + rank + 1)
+        else:
+            combined_results[cid] = {
+                "metadata": item["metadata"],
+                "rrf_score": 1.0 / (k_rrf + rank + 1),
+                "score": item["score"]
+            }
+            
     merged_results = list(combined_results.values())
-    merged_results.sort(key=lambda x: x["score"], reverse=True)
+    # Sort by RRF score
+    merged_results.sort(key=lambda x: x["rrf_score"], reverse=True)
     merged_results = merged_results[:top_k * 2] # Keep top candidates for re-ranking
 
     # 4. Cross-Encoder Re-ranking

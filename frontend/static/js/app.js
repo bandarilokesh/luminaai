@@ -52,7 +52,12 @@ const state = {
     flashcards: null,
     cardIndex: 0,
     cardFlipped: false,
-    researchGaps: null
+    flashcards: null,
+    cardIndex: 0,
+    cardFlipped: false,
+    researchGaps: null,
+    graphData: null,
+    comparisonData: null
 };
 
 // ---- Toast ----
@@ -106,7 +111,8 @@ function renderPage() {
     const titles = {
         dashboard: 'Dashboard', library: 'Library', upload: 'Upload Research',
         qa: 'QA Sessions', summary: 'Summaries', 'study-tools': 'Study Tools',
-        'research-gaps': 'Research Gaps', settings: 'Settings'
+        'research-gaps': 'Research Gaps', settings: 'Settings',
+        comparison: 'Paper Comparison'
     };
     document.getElementById('topnav-title').textContent = titles[page] || 'Lumina Ai';
 
@@ -125,7 +131,8 @@ function renderPage() {
         summary: renderSummary,
         'study-tools': renderStudyTools,
         'research-gaps': renderResearchGaps,
-        settings: renderSettings
+        settings: renderSettings,
+        comparison: renderComparison
     };
 
     (renderers[page] || renderDashboard)(container);
@@ -960,8 +967,68 @@ function renderGaps(gaps) {
     </div>`).join('');
 }
 
+
 // ============================================================
-// PAGE: Settings
+// PAGE: Comparison
+// ============================================================
+async function renderComparison(el) {
+    const papers = await api.get('/papers/') || [];
+    const completedPapers = papers.filter(p => p.status === 'completed');
+
+    el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
+        <div>
+            <h2 class="headline-lg mb-xs">Paper Comparison</h2>
+            <p class="body-md text-muted">Automatically generate a structured comparison of methodologies, datasets, and results.</p>
+        </div>
+        
+        <div>
+            <label class="form-label">SELECT PAPERS TO COMPARE</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${completedPapers.map(p => `
+                    <label class="chip ${state.selectedPapers.includes(p.id) ? 'chip-active' : 'chip-default'}" style="cursor:pointer;">
+                        <input type="checkbox" value="${p.id}" ${state.selectedPapers.includes(p.id) ? 'checked' : ''} style="display:none;" onchange="togglePaperSelection(this)" />
+                        ${escapeHtml(p.title.substring(0, 35))}${p.title.length > 35 ? '...' : ''}
+                    </label>
+                `).join('') || '<p class="body-sm text-muted">No papers available.</p>'}
+            </div>
+        </div>
+        
+        <button class="btn-primary" style="align-self:flex-start;" onclick="runComparison()">
+            <span class="material-symbols-outlined" style="font-size:18px;">compare_arrows</span> Compare Selected Papers
+        </button>
+        
+        <div id="comparison-result"></div>
+    </div>`;
+}
+
+async function runComparison() {
+    if (state.selectedPapers.length < 2) return showToast('Please select at least TWO papers to compare.', 'info');
+    
+    const resultEl = document.getElementById('comparison-result');
+    resultEl.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
+
+    const res = await api.post('/compare', state.selectedPapers);
+    if (res && res.comparison_markdown) {
+        resultEl.innerHTML = `
+        <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-md);">
+                <h3 class="headline-md">Comparison Result</h3>
+            </div>
+            <div class="body-md" style="line-height:1.8;white-space:pre-wrap;color:rgba(218,226,253,0.9);">${escapeHtml(res.comparison_markdown)}</div>
+            <div style="display:flex;gap:12px;margin-top:var(--sp-md);padding-top:var(--sp-md);border-top:1px solid rgba(70,69,85,0.1);">
+                <button class="btn-secondary" onclick="downloadAs('comparison.md', \`${res.comparison_markdown.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">
+                    <span class="material-symbols-outlined" style="font-size:16px;">download</span> Export MD
+                </button>
+            </div>
+        </div>`;
+    } else {
+        resultEl.innerHTML = '<p class="body-sm text-error">Failed to generate comparison.</p>';
+    }
+}
+
+// ============================================================
+// INIT
 // ============================================================
 async function renderSettings(el) {
     const status = await api.get('/status');

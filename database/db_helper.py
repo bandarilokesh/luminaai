@@ -23,7 +23,7 @@ class DatabaseHelper:
         return conn
 
     def _init_db(self):
-        """Initialize the SQLite database schema if tables do not exist."""
+        """Initialize the SQLite database schema if tables do not exist, and run migrations."""
         logger.info(f"Initializing database at: {self.db_path}")
         with self._get_connection() as conn:
             # Papers Table
@@ -82,6 +82,10 @@ class DatabaseHelper:
             
             conn.commit()
             logger.info("Database schemas verified/created successfully.")
+            
+        # Run migrations for v2 schema updates
+        from database.migrations import run_migrations
+        run_migrations(self.db_path)
 
     # Papers Database CRUD Operations
     def add_paper(self, paper_metadata: Dict[str, Any]) -> str:
@@ -183,15 +187,16 @@ class DatabaseHelper:
             return row["content"] if row else None
 
     # QA History Operations
-    def add_qa_log(self, paper_id: Optional[str], question: str, answer: str, citations: List[Dict[str, Any]], confidence_score: float):
+    def add_qa_log(self, paper_id: Optional[str], question: str, answer: str, citations: List[Dict[str, Any]], 
+                   confidence_score: float, faithfulness_score: float = 0.0, verification_json: str = "{}"):
         """Log a QA interaction."""
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO qa_history (paper_id, question, answer, citations, confidence_score)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO qa_history (paper_id, question, answer, citations, confidence_score, faithfulness_score, verification_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (paper_id, question, answer, json.dumps(citations), confidence_score)
+                (paper_id, question, answer, json.dumps(citations), confidence_score, faithfulness_score, verification_json)
             )
             conn.commit()
 
