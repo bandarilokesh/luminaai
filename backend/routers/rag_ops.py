@@ -19,7 +19,6 @@ from backend.schemas import (
 )
 from utils.logger import logger
 
-# Import models/rag service endpoints (stubs for now)
 from services.gemini_client import gemini_client
 from rag.qa_service import answer_question
 from rag.summarizer import generate_paper_summary

@@ -9,7 +9,6 @@ from database.db_helper import db
 from backend.schemas import PaperResponse, SimpleMessageResponse, SearchHistoryResponse
 from utils.logger import logger
 
-# Import RAG steps (stubs for now)
 from rag.pdf_processor import extract_pdf_data
 from rag.chunker import hierarchical_chunker
 from rag.vector_store import index_paper_chunks, delete_paper_from_vector_store

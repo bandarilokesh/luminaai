@@ -5,10 +5,6 @@ python-multipart>=0.0.9
 pydantic>=2.6.4
 pydantic-settings>=2.2.1
 
-# Streamlit Frontend
-streamlit>=1.32.0
-watchdog>=4.0.0
-
 # Document Processing
 pymupdf>=1.23.26
 pdfplumber>=0.11.0

@@ -134,4 +134,5 @@ logs/
 database/*.db
 database/*.db-journal
 .env
-.env.*
+.env.local
+!.env.example
