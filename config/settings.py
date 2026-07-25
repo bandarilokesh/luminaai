@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # UI / Security Settings
     MAX_UPLOAD_SIZE_MB: int = 50
     ALLOWED_EXTENSIONS: set = {"pdf"}
+
+    # Optional shared access code. Leave blank to keep the app fully open.
+    # When set, visitors must enter this code before using the app.
+    ACCESS_CODE: str = ""
     
     # Settings configuration
     model_config = SettingsConfigDict(

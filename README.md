@@ -1,3 +1,13 @@
+---
+title: Lumina AI
+emoji: 🧠
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # Lumina AI 🧠
 
 Welcome to **Lumina AI**! This is a complete, beginner-friendly guide to understanding, installing, and using your very own local Research Assistant powered by Retrieval-Augmented Generation (RAG) and Google's Gemini AI.
@@ -97,6 +107,62 @@ If you prefer using Docker, it's incredibly easy! Just make sure your `.env` fil
 docker-compose up --build
 ```
 This will start both Lumina AI and a local Ollama instance (for fully offline inference). The application will be available at `http://localhost:8000`.
+
+---
+
+## 🌐 Deploy It for Free (So Anyone, Anywhere Can Use It)
+
+Right now Lumina AI only runs on your own computer. This section walks you through putting it on the public internet, for free, using **Hugging Face Spaces** — chosen because it gives you a generous free tier (2 CPU cores, 16 GB RAM) that comfortably fits this app's AI models, needs no credit card, and builds straight from your existing `Dockerfile`.
+
+> ⚠️ **Before you deploy:** this app has no login system, and it uses *your* Gemini API key on the server for every request. If you make it public without protection, strangers who find the link can use up your Gemini quota. Lumina AI now includes an optional **access code** gate for exactly this reason — set it in Step 4 below. Leave it blank only if you're fine with the app being 100% open.
+
+### Step 1: Get your accounts ready
+- A free [Hugging Face](https://huggingface.co/join) account.
+- Your **Gemini API key** from [Google AI Studio](https://aistudio.google.com/) (same one you use locally).
+- Make sure your latest code is pushed to your GitHub repo (`git push`), so nothing gets lost.
+
+### Step 2: Create a new Space
+1. Go to [huggingface.co/new-space](https://huggingface.co/new-space).
+2. Give it a name (e.g. `lumina-ai`).
+3. Under **Select the Space SDK**, choose **Docker** → **Blank**.
+4. Choose the **CPU basic · Free** hardware tier.
+5. Set visibility to **Public** (so anyone can open the link) and click **Create Space**.
+
+### Step 3: Push your code to the Space
+Hugging Face gives every Space its own git repository. Add it as a second remote alongside your existing GitHub `origin` and push to it:
+
+```bash
+git remote add space https://huggingface.co/spaces/<your-username>/<your-space-name>
+git push space main
+```
+
+You'll be prompted for credentials — use your Hugging Face username and an [access token](https://huggingface.co/settings/tokens) (with "write" permission) as the password.
+
+This repo's `README.md` already has the small YAML block at the top (`sdk: docker`, `app_port: 8000`) that tells the Space how to build it — you don't need to add anything for that part.
+
+### Step 4: Add your secrets
+Your `.env` file never gets pushed (it's git-ignored on purpose), so you set these in the Space's UI instead:
+
+1. On your Space's page, go to **Settings → Variables and secrets**.
+2. Add these as **Secrets** (hidden, encrypted):
+   - `GEMINI_API_KEY` — your Gemini API key.
+   - `ACCESS_CODE` — a password you make up, e.g. `letmein-2026`. Share this only with people you want using the app. Leave it out entirely if you want the app fully open.
+3. (Optional) Add these as plain **Variables** if you want lighter, faster models — recommended on the free tier so the app starts up quickly:
+   - `DEFAULT_EMBEDDING_MODEL` = `BAAI/bge-small-en-v1.5`
+   - `RERANK_MODEL` = `cross-encoder/ms-marco-MiniLM-L-6-v2`
+
+### Step 5: Wait for the build, then open it
+- The Space will automatically start building your Docker image — you can watch progress under the **Logs** tab. This takes a few minutes the first time (it's installing PyTorch and downloading AI models).
+- Once it says **Running**, click **App** at the top — that's your public URL, something like `https://huggingface.co/spaces/<your-username>/<your-space-name>`.
+- If you set an `ACCESS_CODE`, you (and anyone you share the link with) will see a small login screen first.
+
+### Good to know about the free tier
+- **Storage resets on restart.** Free Spaces don't have permanent disk storage — if the Space sleeps (after ~48 hours of no visits) and wakes back up, or if you push a new update, previously uploaded PDFs and their vector caches are gone and need to be re-uploaded. This is fine for a demo/portfolio project; it's not a place to permanently store documents.
+- **Cold starts.** The first request after the Space has been asleep can take 15–30 seconds while it wakes up.
+- **Updating your app later:** just push new commits to the `space` remote (`git push space main`) and it rebuilds automatically.
+
+### Alternative: Render.com
+[Render](https://render.com) also has a free web-service tier and deploys straight from your GitHub repo with no extra git remote needed — but its free tier only gives **512 MB RAM**, which is tight for this app's embedding models. If you go this route, make sure to set the lighter `DEFAULT_EMBEDDING_MODEL` and `RERANK_MODEL` values from Step 4 above (as Environment Variables in Render's dashboard, plus `GEMINI_API_KEY` and `ACCESS_CODE` as Secret values), and expect the free instance to spin down after 15 minutes of inactivity with a slower cold start on the next visit.
 
 ---
 

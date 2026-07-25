@@ -1,14 +1,17 @@
+import hmac
+import os
 import sys
 import uvicorn
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import Body, FastAPI, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from config.settings import settings
 from utils.logger import logger
 from database.db_helper import db
+from backend.auth import COOKIE_NAME, LOGIN_PAGE_HTML, is_authorized
 from backend.routers import papers, rag_ops
 
 # Resolve frontend static directory
@@ -40,6 +43,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Optional shared-access-code gate (only active when settings.ACCESS_CODE is set)
+@app.middleware("http")
+async def access_gate(request: Request, call_next):
+    if not settings.ACCESS_CODE:
+        return await call_next(request)
+    if request.url.path in ("/health", "/api/auth/login"):
+        return await call_next(request)
+    if is_authorized(request):
+        return await call_next(request)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(status_code=401, content={"detail": "Access code required."})
+    return HTMLResponse(LOGIN_PAGE_HTML, status_code=401)
+
+
+@app.post("/api/auth/login", tags=["Auth"], include_in_schema=False)
+async def login(payload: dict = Body(...)):
+    """Validate the shared access code and set the session cookie."""
+    code = str(payload.get("code", ""))
+    if settings.ACCESS_CODE and hmac.compare_digest(code, settings.ACCESS_CODE):
+        response = JSONResponse({"status": "ok"})
+        response.set_cookie(
+            COOKIE_NAME,
+            settings.ACCESS_CODE,
+            max_age=60 * 60 * 24 * 30,
+            httponly=True,
+            samesite="lax",
+        )
+        return response
+    return JSONResponse(status_code=401, content={"detail": "Incorrect access code."})
+
 
 # Global Exception Handler
 @app.exception_handler(Exception)
@@ -78,4 +112,5 @@ async def serve_spa(full_path: str):
 
 if __name__ == "__main__":
     logger.info("Running API server directly via uvicorn...")
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
