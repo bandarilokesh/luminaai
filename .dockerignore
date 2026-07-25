@@ -15,4 +15,3 @@ logs
 database/*.db
 database/*.db-journal
 *.md
-Start-Lumina-Ai.bat

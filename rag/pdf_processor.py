@@ -3,7 +3,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Tuple, List
 import fitz  # PyMuPDF
-import pdfplumber
 from PIL import Image
 import io
 from utils.logger import logger

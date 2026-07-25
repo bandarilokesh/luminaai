@@ -1,7 +1,5 @@
-import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
 
 # Base Directory of the Project
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,14 +24,7 @@ class Settings(BaseSettings):
     
     # Embeddings Configurations
     DEFAULT_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
-    AVAILABLE_EMBEDDING_MODELS: dict = {
-        "BAAI/bge-small-en-v1.5": "BGE Small English (Fast, 384d)",
-        "BAAI/bge-base-en-v1.5": "BGE Base English (Balanced, 768d)",
-        "sentence-transformers/all-MiniLM-L6-v2": "MiniLM L6 (Ultralight, 384d)",
-        "intfloat/e5-small-v2": "E5 Small V2 (Efficient, 384d)",
-        "intfloat/e5-base-v2": "E5 Base V2 (High quality, 768d)"
-    }
-    
+
     # Re-ranking Configurations
     RERANK_MODEL: str = "BAAI/bge-reranker-v2-m3"
     USE_RERANKER: bool = True
@@ -44,8 +35,6 @@ class Settings(BaseSettings):
     
     # Retrieval Settings
     TOP_K_DENSE: int = 5
-    TOP_K_SPARSE: int = 5
-    HYBRID_ALPHA: float = 0.5  # Fusion weight (0.0 = pure BM25, 1.0 = pure dense)
     RERANK_TOP_N: int = 3
     
     # Gemini API Configurations

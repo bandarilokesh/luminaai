@@ -136,3 +136,4 @@ database/*.db-journal
 .env
 .env.local
 !.env.example
+lumina.pid

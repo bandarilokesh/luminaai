@@ -1,1 +1,1 @@
-"""Frontend package for Lumina Ai. Holds Streamlit pages and assets."""
+"""Frontend package for Lumina Ai. Holds the static HTML/CSS/JS SPA assets."""

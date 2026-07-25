@@ -1,6 +1,4 @@
 import time
-import os
-import psutil
 import json
 import asyncio
 import numpy as np

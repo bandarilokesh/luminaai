@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 import psutil
 from logging.handlers import RotatingFileHandler
@@ -39,7 +40,10 @@ def setup_logger(name: str = "lumina_ai") -> logging.Logger:
     stats_filter = SystemStatsFilter()
     
     # Console Handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # sys.stdout is None under pythonw.exe (no console attached), which would
+    # otherwise crash the handler on the first emitted record.
+    console_stream = sys.stdout if sys.stdout is not None else open(os.devnull, "w")
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     console_handler.addFilter(stats_filter)

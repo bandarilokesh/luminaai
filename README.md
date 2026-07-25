@@ -1,13 +1,3 @@
----
-title: Lumina AI
-emoji: 🧠
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-app_port: 8000
-pinned: false
----
-
 # Lumina AI 🧠
 
 Welcome to **Lumina AI**! This is a complete, beginner-friendly guide to understanding, installing, and using your very own local Research Assistant powered by Retrieval-Augmented Generation (RAG) and Google's Gemini AI.
@@ -16,16 +6,19 @@ Welcome to **Lumina AI**! This is a complete, beginner-friendly guide to underst
 
 ## 🌟 What is Lumina AI?
 
-Have you ever had to read a 30-page academic paper and wished you could just "talk" to it? That's what Lumina AI does! 
+Have you ever had to read a 30-page academic paper and wished you could just "talk" to it? That's what Lumina AI does!
 
 It is an enterprise-grade desktop web application that allows you to:
-- **Upload** complex PDF research papers.
-- **Summarize** them instantly in different styles (Abstract, ELI5, Technical).
-- **Ask Questions** and get answers directly sourced and cited from the uploaded documents, verified against hallucinations.
+- **Upload** complex PDF research papers (including scanned/image-based PDFs via optional OCR).
+- **Summarize** them instantly in different styles — Abstract, Methodology, Results, Conclusion, ELI5 ("Explain Like I'm 5"), Technical, and Bullet-point briefs.
+- **Ask Questions** and get answers directly sourced and cited from the uploaded documents, either as a normal response or streamed live over a WebSocket.
+- **Verify every answer** through an automated pipeline that decomposes claims, checks them against the retrieved evidence, validates citation accuracy, and attaches a confidence score — so you know when to trust it.
 - **Generate Study Tools** like flashcards and multiple-choice quizzes to test your comprehension.
-- **Visualize** relationships through automatically generated Knowledge Graphs.
-- **Detect Gaps & Contradictions** across a corpus using AI Research Agents.
-- **Fully Offline Capable**: Use Google Gemini for speed, or swap to Ollama to keep everything 100% local and private.
+- **Visualize** relationships through automatically generated Knowledge Graphs of methods, datasets, and entities.
+- **Detect Research Gaps** — an AI research agent reviews your corpus for limitations, missing experiments, and contradictions.
+- **Compare Papers** side-by-side in a structured Markdown table.
+- **Fully Offline Capable**: Use Google Gemini for speed, or switch the `LLM_PROVIDER` to Ollama to keep everything 100% local and private.
+- **Optional Access Code**: gate the whole app behind a shared password if you ever expose it beyond your own machine.
 
 ---
 
@@ -34,9 +27,10 @@ It is an enterprise-grade desktop web application that allows you to:
 Lumina AI uses a modern **Clean Architecture** to keep the code organized and easy to understand:
 
 1. **The Frontend (UI):** Built entirely with pure HTML, CSS, and JavaScript. It features a trendy, matte, image-based design system with a floating sidebar and dynamic content rendering. No complex frameworks like React or Tailwind are required!
-2. **The Backend (API):** Powered by **FastAPI** (Python). This handles all the heavy lifting, routing your requests, and serving the beautiful user interface.
-3. **The RAG Engine:** "RAG" stands for Retrieval-Augmented Generation. When you upload a PDF, this engine reads it, breaks it down into small logical chunks, and saves those chunks into a Vector Database. When you ask a question, it searches for the most relevant chunks and sends them to the AI so the AI can answer accurately without guessing (hallucinating).
-4. **The AI Connectors:** Connects securely to Google's Gemini models using the modern `google-genai` SDK to generate summaries and answers.
+2. **The Backend (API):** Powered by **FastAPI** (Python). This handles all the heavy lifting, routing your requests, and serving the user interface.
+3. **The RAG Engine:** When you upload a PDF, it's parsed (text, tables, and sections classified) and split with a hierarchical chunker. Chunks are indexed into both a **dense vector store** (FAISS/Chroma with sentence-transformer embeddings) and a **sparse BM25 index**; at query time both are searched and fused, then a cross-encoder reranks the results before they're handed to the LLM.
+4. **The Verification Pipeline:** Before an answer reaches you, it's decomposed into individual claims, each claim is checked against the retrieved evidence, citation markers are validated against the actual source chunks, and a final confidence score is computed.
+5. **The AI Connectors:** Connects securely to Google's Gemini models using the modern `google-genai` SDK, with an optional switch to a local Ollama instance for fully offline inference.
 
 ---
 
@@ -46,15 +40,16 @@ Follow these simple steps to get Lumina AI running on your computer.
 
 ### Prerequisites
 - **Python 3.12+** installed on your machine.
-- A **Gemini API Key**. You can get one for free from [Google AI Studio](https://aistudio.google.com/).
+- A **Gemini API Key** (free from [Google AI Studio](https://aistudio.google.com/)) — unless you plan to run entirely on **Ollama** instead (see Configuration below).
+- *(Optional)* **Tesseract OCR** installed and on your `PATH` if you want to extract text from scanned/image-only PDFs. Without it, Lumina AI still works fine for normal (text-based) PDFs.
 
 ### Step-by-Step Installation
 
 1. **Clone the Repository:**
    Open your terminal/command prompt and run:
    ```bash
-   git clone https://github.com/bandarilokesh/PaperMind-Ai.git
-   cd PaperMind-Ai
+   git clone https://github.com/bandarilokesh/luminaai.git
+   cd luminaai
    ```
 
 2. **Create a Virtual Environment:**
@@ -76,19 +71,19 @@ Follow these simple steps to get Lumina AI running on your computer.
      ```
 
 4. **Set Up Your Environment Variables:**
-   The project needs your Gemini API key to work. 
    - Copy the `.env.example` file and rename it to `.env`.
    - Open the `.env` file in any text editor and paste your API key:
      ```env
      GEMINI_API_KEY=your_actual_api_key_here
      ```
+   - See [Configuration](#-configuration) below for the other options available (Ollama, access code, chunking, retrieval, etc.).
 
 5. **Start the Application!**
-   Run the FastAPI server:
-   - On **Windows**:
+   - On **Windows**, either run the FastAPI server directly:
      ```bash
      .venv\Scripts\uvicorn backend.main:app --reload --port 8000
      ```
+     ...or just double-click **`Start-Lumina-Ai.vbs`** — it launches the server with zero terminal windows and opens your browser automatically once it's ready. Double-click **`Stop-Lumina-Ai.vbs`** to shut it back down.
    - On **Mac/Linux**:
      ```bash
      uvicorn backend.main:app --reload --port 8000
@@ -99,79 +94,30 @@ Follow these simple steps to get Lumina AI running on your computer.
 
 ---
 
-## 🐳 Running with Docker (Alternative)
+## ⚙️ Configuration
 
-If you prefer using Docker, it's incredibly easy! Just make sure your `.env` file is set up with your API key, then run:
+All configuration lives in `.env` (copy it from `.env.example`). The most useful options:
 
-```bash
-docker-compose up --build
-```
-This will start both Lumina AI and a local Ollama instance (for fully offline inference). The application will be available at `http://localhost:8000`.
-
----
-
-## 🌐 Deploy It for Free (So Anyone, Anywhere Can Use It)
-
-Right now Lumina AI only runs on your own computer. This section walks you through putting it on the public internet, for free, using **Hugging Face Spaces** — chosen because it gives you a generous free tier (2 CPU cores, 16 GB RAM) that comfortably fits this app's AI models, needs no credit card, and builds straight from your existing `Dockerfile`.
-
-> ⚠️ **Before you deploy:** this app has no login system, and it uses *your* Gemini API key on the server for every request. If you make it public without protection, strangers who find the link can use up your Gemini quota. Lumina AI now includes an optional **access code** gate for exactly this reason — set it in Step 4 below. Leave it blank only if you're fine with the app being 100% open.
-
-### Step 1: Get your accounts ready
-- A free [Hugging Face](https://huggingface.co/join) account.
-- Your **Gemini API key** from [Google AI Studio](https://aistudio.google.com/) (same one you use locally).
-- Make sure your latest code is pushed to your GitHub repo (`git push`), so nothing gets lost.
-
-### Step 2: Create a new Space
-1. Go to [huggingface.co/new-space](https://huggingface.co/new-space).
-2. Give it a name (e.g. `lumina-ai`).
-3. Under **Select the Space SDK**, choose **Docker** → **Blank**.
-4. Choose the **CPU basic · Free** hardware tier.
-5. Set visibility to **Public** (so anyone can open the link) and click **Create Space**.
-
-### Step 3: Push your code to the Space
-Hugging Face gives every Space its own git repository. Add it as a second remote alongside your existing GitHub `origin` and push to it:
-
-```bash
-git remote add space https://huggingface.co/spaces/<your-username>/<your-space-name>
-git push space main
-```
-
-You'll be prompted for credentials — use your Hugging Face username and an [access token](https://huggingface.co/settings/tokens) (with "write" permission) as the password.
-
-This repo's `README.md` already has the small YAML block at the top (`sdk: docker`, `app_port: 8000`) that tells the Space how to build it — you don't need to add anything for that part.
-
-### Step 4: Add your secrets
-Your `.env` file never gets pushed (it's git-ignored on purpose), so you set these in the Space's UI instead:
-
-1. On your Space's page, go to **Settings → Variables and secrets**.
-2. Add these as **Secrets** (hidden, encrypted):
-   - `GEMINI_API_KEY` — your Gemini API key.
-   - `ACCESS_CODE` — a password you make up, e.g. `letmein-2026`. Share this only with people you want using the app. Leave it out entirely if you want the app fully open.
-3. (Optional) Add these as plain **Variables** if you want lighter, faster models — recommended on the free tier so the app starts up quickly:
-   - `DEFAULT_EMBEDDING_MODEL` = `BAAI/bge-small-en-v1.5`
-   - `RERANK_MODEL` = `cross-encoder/ms-marco-MiniLM-L-6-v2`
-
-### Step 5: Wait for the build, then open it
-- The Space will automatically start building your Docker image — you can watch progress under the **Logs** tab. This takes a few minutes the first time (it's installing PyTorch and downloading AI models).
-- Once it says **Running**, click **App** at the top — that's your public URL, something like `https://huggingface.co/spaces/<your-username>/<your-space-name>`.
-- If you set an `ACCESS_CODE`, you (and anyone you share the link with) will see a small login screen first.
-
-### Good to know about the free tier
-- **Storage resets on restart.** Free Spaces don't have permanent disk storage — if the Space sleeps (after ~48 hours of no visits) and wakes back up, or if you push a new update, previously uploaded PDFs and their vector caches are gone and need to be re-uploaded. This is fine for a demo/portfolio project; it's not a place to permanently store documents.
-- **Cold starts.** The first request after the Space has been asleep can take 15–30 seconds while it wakes up.
-- **Updating your app later:** just push new commits to the `space` remote (`git push space main`) and it rebuilds automatically.
-
-### Alternative: Render.com
-[Render](https://render.com) also has a free web-service tier and deploys straight from your GitHub repo with no extra git remote needed — but its free tier only gives **512 MB RAM**, which is tight for this app's embedding models. If you go this route, make sure to set the lighter `DEFAULT_EMBEDDING_MODEL` and `RERANK_MODEL` values from Step 4 above (as Environment Variables in Render's dashboard, plus `GEMINI_API_KEY` and `ACCESS_CODE` as Secret values), and expect the free instance to spin down after 15 minutes of inactivity with a slower cold start on the next visit.
+| Variable | What it does |
+|---|---|
+| `GEMINI_API_KEY` | Your Google AI Studio key. Required unless `LLM_PROVIDER=ollama`. |
+| `LLM_PROVIDER` | `gemini` (default) or `ollama` — switches every summary/QA/agent call to a local Ollama instance at `OLLAMA_API_URL`. |
+| `MODEL_NAME` | Which model to call (e.g. `gemini-flash-lite-latest`, or an Ollama model tag). |
+| `ACCESS_CODE` | Optional shared password. Leave blank for an open app; set it to require a login screen before anyone can use it. |
+| `DEFAULT_EMBEDDING_MODEL` | Sentence-transformer model used for dense retrieval (e.g. `BAAI/bge-small-en-v1.5`). |
+| `RERANK_MODEL` / `USE_RERANKER` | Cross-encoder reranker applied after hybrid retrieval. |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Controls the hierarchical chunker's target chunk size and overlap. |
+| `TOP_K_DENSE` / `RERANK_TOP_N` | How many chunks are retrieved vs. kept after reranking. |
 
 ---
 
 ## 🎨 A Tour of the Application
 
-- **Dashboard:** The main landing page. Use the "Quick Upload" button to add new PDF papers to your local library.
-- **Library:** View all the papers you have uploaded. 
-- **QA (Question & Answer):** Select a paper and ask questions about it. The AI will provide cited answers!
-- **Summary:** Get automated summaries of your papers. Choose from different perspectives like "Methodology" or "ELI5" (Explain Like I'm 5).
+- **Dashboard:** The main landing page. Use the "Quick Upload" button to add new PDF papers to your local library, and see recent activity at a glance.
+- **Library:** View all the papers you have uploaded.
+- **QA (Question & Answer):** Select a paper and ask questions about it. The AI provides cited, verified answers, streamed live as they're generated.
+- **Summary:** Get automated summaries of your papers in multiple styles — Abstract, Methodology, Results, Conclusion, ELI5, Technical, or Bullet-point.
+- **Flashcards & Quizzes:** Auto-generate study flashcards and multiple-choice quizzes from any paper.
 - **Knowledge Graph:** See the extracted methods, datasets, and entities mapped out across your research library.
 - **Compare Papers:** Generate a structured Markdown comparison table analyzing multiple papers side-by-side.
 - **Research Gaps:** Let the AI act as a peer reviewer to detect missing experiments and contradictions across a corpus.
@@ -182,6 +128,7 @@ Your `.env` file never gets pushed (it's git-ignored on purpose), so you set the
 
 - **Error: 404 models/gemini-1.5-flash is not found:** Ensure you are using the latest `google-genai` SDK and not the deprecated `google-generativeai` library. Lumina AI has already been updated to use the correct library!
 - **Port 8000 is in use:** If the server won't start because the port is busy, you can change the port by running: `uvicorn backend.main:app --reload --port 8080` (and then visit `http://localhost:8080`).
+- **Scanned PDFs return little/no text:** Install Tesseract OCR and make sure it's on your system `PATH`. Without it, Lumina AI logs a warning and falls back to whatever text layer the PDF already has.
 
 ---
 
