@@ -1,148 +1,109 @@
-# Lumina AI 🧠
+# Lumina AI
 
-Welcome to **Lumina AI**! This is a complete, beginner-friendly guide to understanding, installing, and using your very own local Research Assistant powered by Retrieval-Augmented Generation (RAG) and Google's Gemini AI.
+A Retrieval-Augmented Generation (RAG) research assistant. Upload PDF papers, ask questions answered **only** from
+those papers (with citations), and generate summaries, quizzes, flashcards, comparisons and research-gap reports.
 
----
+Everything runs on free tiers: **Groq** or **Gemini** for the LLM, **Jina AI** for embeddings, **Qdrant** (Docker)
+as the vector database and **Langfuse Cloud** for observability. No local models are downloaded.
 
-## 🌟 What is Lumina AI?
+## How it works
 
-Have you ever had to read a 30-page academic paper and wished you could just "talk" to it? That's what Lumina AI does!
+**Indexing pipeline** (once per paper)
 
-It is an enterprise-grade desktop web application that allows you to:
-- **Upload** complex PDF research papers (including scanned/image-based PDFs via optional OCR).
-- **Summarize** them instantly in different styles — Abstract, Methodology, Results, Conclusion, ELI5 ("Explain Like I'm 5"), Technical, and Bullet-point briefs.
-- **Ask Questions** and get answers directly sourced and cited from the uploaded documents, either as a normal response or streamed live over a WebSocket.
-- **Verify every answer** through an automated pipeline that decomposes claims, checks them against the retrieved evidence, validates citation accuracy, and attaches a confidence score — so you know when to trust it.
-- **Generate Study Tools** like flashcards and multiple-choice quizzes to test your comprehension.
-- **Visualize** relationships through automatically generated Knowledge Graphs of methods, datasets, and entities.
-- **Detect Research Gaps** — an AI research agent reviews your corpus for limitations, missing experiments, and contradictions.
-- **Compare Papers** side-by-side in a structured Markdown table.
-- **Fully Offline Capable**: Use Google Gemini for speed, or switch the `LLM_PROVIDER` to Ollama to keep everything 100% local and private.
-- **Optional Access Code**: gate the whole app behind a shared password if you ever expose it beyond your own machine.
+```
+PDF -> Loader -> Cleaning -> Recursive Chunker -> Jina embeddings -> Qdrant (ID + vector + payload)
+```
 
----
+| Step | File | What it does |
+|---|---|---|
+| Loader | [app/rag/loader.py](app/rag/loader.py) | PyMuPDF text per page; removes repeated headers/footers and page numbers, fixes hyphenation, normalizes text; extracts title, authors, abstract and section headings (metadata). |
+| Chunker | [app/rag/chunker.py](app/rag/chunker.py) | Recursive chunking (paragraph → line → sentence → word), 400 tokens with 60 overlap (15%). Each chunk keeps page and section. |
+| Embedding model | [app/rag/embeddings.py](app/rag/embeddings.py) | `jina-embeddings-v3`, normalized vectors. Same model for documents (`retrieval.passage`) and queries (`retrieval.query`). |
+| Vector database | [app/rag/vector_store.py](app/rag/vector_store.py) | Qdrant collection with cosine distance; `create_collection`, `upsert`, `query_points`, `delete`, `get_collection`; payload index on `paper_id` for metadata filtering. |
 
-## 🏗️ How Does it Work? (The Architecture)
+**Query pipeline** (every question)
 
-Lumina AI uses a modern **Clean Architecture** to keep the code organized and easy to understand:
+```
+Question -> query embedding -> Retriever (top-k, filtered by paper) -> context injection -> LLM -> cited answer
+```
 
-1. **The Frontend (UI):** Built entirely with pure HTML, CSS, and JavaScript. It features a trendy, matte, image-based design system with a floating sidebar and dynamic content rendering. No complex frameworks like React or Tailwind are required!
-2. **The Backend (API):** Powered by **FastAPI** (Python). This handles all the heavy lifting, routing your requests, and serving the user interface.
-3. **The RAG Engine:** When you upload a PDF, it's parsed (text, tables, and sections classified) and split with a hierarchical chunker. Chunks are indexed into both a **dense vector store** (FAISS/Chroma with sentence-transformer embeddings) and a **sparse BM25 index**; at query time both are searched and fused, then a cross-encoder reranks the results before they're handed to the LLM.
-4. **The Verification Pipeline:** Before an answer reaches you, it's decomposed into individual claims, each claim is checked against the retrieved evidence, citation markers are validated against the actual source chunks, and a final confidence score is computed.
-5. **The AI Connectors:** Connects securely to Google's Gemini models using the modern `google-genai` SDK, with an optional switch to a local Ollama instance for fully offline inference.
+| Step | File | What it does |
+|---|---|---|
+| Retriever | [app/rag/retriever.py](app/rag/retriever.py) | Semantic (dense) search in Qdrant, top-5 by cosine similarity. |
+| Prompt augmentation | [app/rag/prompts.py](app/rag/prompts.py) | System prompt + prompt template; retrieved chunks injected as numbered context. Grounded generation: *answer only from the context, otherwise say "I don't know"*. |
+| LLM | [app/rag/llm.py](app/rag/llm.py) | Groq or Gemini via their OpenAI-compatible APIs. |
+| Pipelines | [app/rag/pipeline.py](app/rag/pipeline.py) | `index_paper`, `answer_question`, `stream_answer`. |
+| Features | [app/features.py](app/features.py) | Summaries (8 styles), quiz, flashcards, comparison, research gaps — all built on retrieved context. |
 
----
+**Observability**: every request is traced in Langfuse — retrieval (with scores), embedding calls (token usage) and
+each LLM generation (prompt, output, tokens, latency). See [app/observability.py](app/observability.py).
 
-## 🚀 Getting Started
+## Setup
 
-Follow these simple steps to get Lumina AI running on your computer.
+Prerequisites: Python 3.11+, Docker Desktop.
 
-### Prerequisites
-- **Python 3.12+** installed on your machine.
-- A **Gemini API Key** (free from [Google AI Studio](https://aistudio.google.com/)) — unless you plan to run entirely on **Ollama** instead (see Configuration below).
-- *(Optional)* **Tesseract OCR** installed and on your `PATH` if you want to extract text from scanned/image-only PDFs. Without it, Lumina AI still works fine for normal (text-based) PDFs.
+1. **Get free API keys**
+   - LLM, one of: Groq — <https://console.groq.com/keys>, or Gemini — <https://aistudio.google.com/apikey>
+   - Embeddings: Jina AI — <https://jina.ai/embeddings>
+   - Observability (optional): Langfuse — <https://cloud.langfuse.com> → create a project → Settings → API Keys
 
-### Step-by-Step Installation
-
-1. **Clone the Repository:**
-   Open your terminal/command prompt and run:
+2. **Configure**
    ```bash
-   git clone https://github.com/bandarilokesh/luminaai.git
-   cd luminaai
+   copy .env.example .env      # macOS/Linux: cp .env.example .env
    ```
+   Fill in `LLM_PROVIDER` (`groq` or `gemini`), the matching API key, `JINA_API_KEY`, and optionally the
+   `LANGFUSE_*` keys.
 
-2. **Create a Virtual Environment:**
-   This creates a safe, isolated space for the project's Python dependencies.
+3. **Start Qdrant**
+   ```bash
+   docker compose up -d qdrant
+   ```
+   Dashboard: <http://localhost:6333/dashboard>
+
+4. **Install and run**
    ```bash
    python -m venv .venv
+   .venv\Scripts\pip install -r requirements.txt          # macOS/Linux: .venv/bin/pip ...
+   .venv\Scripts\uvicorn app.main:app --port 8000
    ```
+   Open <http://localhost:8000>. The Settings page shows whether Qdrant, the LLM, Jina and Langfuse are connected.
 
-3. **Install Dependencies:**
-   Activate the environment and install the required packages.
-   - On **Windows**:
-     ```bash
-     .venv\Scripts\pip install -r requirements.txt
-     ```
-   - On **Mac/Linux**:
-     ```bash
-     source .venv/bin/activate
-     pip install -r requirements.txt
-     ```
+To run the whole stack in Docker instead: `docker compose --profile app up -d --build`.
 
-4. **Set Up Your Environment Variables:**
-   - Copy the `.env.example` file and rename it to `.env`.
-   - Open the `.env` file in any text editor and paste your API key:
-     ```env
-     GEMINI_API_KEY=your_actual_api_key_here
-     ```
-   - See [Configuration](#-configuration) below for the other options available (Ollama, access code, chunking, retrieval, etc.).
+## Configuration
 
-5. **Start the Application!**
-   - On **Windows**, either run the FastAPI server directly:
-     ```bash
-     .venv\Scripts\uvicorn backend.main:app --reload --port 8000
-     ```
-     ...or just double-click **`Start-Lumina-Ai.vbs`** — it launches the server with zero terminal windows and opens your browser automatically once it's ready. Double-click **`Stop-Lumina-Ai.vbs`** to shut it back down.
-   - On **Mac/Linux**:
-     ```bash
-     uvicorn backend.main:app --reload --port 8000
-     ```
+All settings live in `.env` (see [.env.example](.env.example)).
 
-6. **Open the App:**
-   Open your web browser and go to **[http://localhost:8000](http://localhost:8000)**. You will see the Lumina AI dashboard!
+| Variable | Default | Notes |
+|---|---|---|
+| `LLM_PROVIDER` | `groq` | `groq` or `gemini` |
+| `GROQ_MODEL` / `GEMINI_MODEL` | `llama-3.3-70b-versatile` / `gemini-flash-lite-latest` | Any chat model the provider offers |
+| `EMBEDDING_MODEL` / `EMBEDDING_DIM` | `jina-embeddings-v3` / `1024` | Changing the dimension needs a new `QDRANT_COLLECTION` |
+| `QDRANT_URL` | `http://localhost:6333` | Also works with a Qdrant Cloud URL + `QDRANT_API_KEY` |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `400` / `60` | Tokens |
+| `TOP_K` | `5` | Chunks retrieved per question |
+| `CONTEXT_TOKEN_BUDGET` | `6000` | Keeps prompts within free-tier rate limits |
+| `ACCESS_CODE` | blank | Optional password for the whole app |
 
----
+## API
 
-## ⚙️ Configuration
+Interactive docs at <http://localhost:8000/docs>. Main endpoints:
 
-All configuration lives in `.env` (copy it from `.env.example`). The most useful options:
+- `POST /api/papers/upload`, `GET /api/papers/`, `DELETE /api/papers/{id}`, `POST /api/papers/{id}/reindex`
+- `POST /api/qa` and `POST /api/qa/stream` (server-sent events) — `paper_ids: []` searches the whole library
+- `POST /api/summary`, `/api/quiz`, `/api/flashcards`, `/api/compare`, `/api/gap-detector`
+- `GET /api/status`, `/api/stats`, `/api/activity`
 
-| Variable | What it does |
-|---|---|
-| `GEMINI_API_KEY` | Your Google AI Studio key. Required unless `LLM_PROVIDER=ollama`. |
-| `LLM_PROVIDER` | `gemini` (default) or `ollama` — switches every summary/QA/agent call to a local Ollama instance at `OLLAMA_API_URL`. |
-| `MODEL_NAME` | Which model to call (e.g. `gemini-flash-lite-latest`, or an Ollama model tag). |
-| `ACCESS_CODE` | Optional shared password. Leave blank for an open app; set it to require a login screen before anyone can use it. |
-| `DEFAULT_EMBEDDING_MODEL` | Sentence-transformer model used for dense retrieval (e.g. `BAAI/bge-small-en-v1.5`). |
-| `RERANK_MODEL` / `USE_RERANKER` | Cross-encoder reranker applied after hybrid retrieval. |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Controls the hierarchical chunker's target chunk size and overlap. |
-| `TOP_K_DENSE` / `RERANK_TOP_N` | How many chunks are retrieved vs. kept after reranking. |
+## Tests
 
----
+```bash
+.venv\Scripts\python -m pytest
+```
 
-## 🎨 A Tour of the Application
+Tests run offline: Qdrant runs in in-memory mode and the embedding model and LLM are replaced with deterministic fakes.
 
-- **Dashboard:** The main landing page. Use the "Quick Upload" button to add new PDF papers to your local library, and see recent activity at a glance.
-- **Library:** View all the papers you have uploaded.
-- **QA (Question & Answer):** Select a paper and ask questions about it. The AI provides cited, verified answers, streamed live as they're generated.
-- **Summary:** Get automated summaries of your papers in multiple styles — Abstract, Methodology, Results, Conclusion, ELI5, Technical, or Bullet-point.
-- **Flashcards & Quizzes:** Auto-generate study flashcards and multiple-choice quizzes from any paper.
-- **Knowledge Graph:** See the extracted methods, datasets, and entities mapped out across your research library.
-- **Compare Papers:** Generate a structured Markdown comparison table analyzing multiple papers side-by-side.
-- **Research Gaps:** Let the AI act as a peer reviewer to detect missing experiments and contradictions across a corpus.
+## Limitations
 
----
-
-## 🛠️ Troubleshooting for Beginners
-
-- **Error: 404 models/gemini-1.5-flash is not found:** Ensure you are using the latest `google-genai` SDK and not the deprecated `google-generativeai` library. Lumina AI has already been updated to use the correct library!
-- **Port 8000 is in use:** If the server won't start because the port is busy, you can change the port by running: `uvicorn backend.main:app --reload --port 8080` (and then visit `http://localhost:8080`).
-- **Scanned PDFs return little/no text:** Install Tesseract OCR and make sure it's on your system `PATH`. Without it, Lumina AI logs a warning and falls back to whatever text layer the PDF already has.
-
----
-
-## 🧪 Running Tests
-
-To ensure everything is working correctly under the hood, you can run the automated test suite:
-
-- On **Windows**:
-  ```bash
-  .venv\Scripts\pytest tests/
-  ```
-- On **Mac/Linux**:
-  ```bash
-  pytest tests/
-  ```
-
-Happy Researching! 📚✨
+- Scanned (image-only) PDFs are not supported — there is no OCR.
+- Retrieval is semantic only; exact-keyword lookups (IDs, rare acronyms) can be missed.
+- Free tiers have rate limits; a 429 error shows as "rate limit reached, retry in a minute".

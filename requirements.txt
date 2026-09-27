@@ -1,27 +1,21 @@
-# FastAPI Backend
-fastapi>=0.110.0
-uvicorn>=0.28.0
+# Web API
+fastapi>=0.115
+uvicorn[standard]>=0.30
 python-multipart>=0.0.9
-pydantic>=2.6.4
-pydantic-settings>=2.2.1
+pydantic-settings>=2.4
 
-# Document Processing
-pymupdf>=1.23.26
-pdfplumber>=0.11.0
-pytesseract>=0.3.10
+# Loader: PDF parsing
+pymupdf>=1.24
 
-# Machine Learning & Embeddings & RAG
-sentence-transformers>=2.6.0
-faiss-cpu>=1.8.0
-chromadb>=0.4.24
-rank-bm25>=0.2.2
-google-genai>=2.10.0
-requests>=2.31.0
-numpy>=1.26.4
-torch>=2.2.0
+# Embeddings (Jina AI API) + LLM (Groq / Gemini via OpenAI-compatible endpoints)
+httpx>=0.27
+openai>=1.50
 
-# Evaluation & Testing
-pytest>=8.1.1
-rouge-score>=0.1.2
-psutil>=5.9.8
+# Vector database
+qdrant-client>=1.12
 
+# Observability
+langfuse>=3.0
+
+# Tests
+pytest>=8.0

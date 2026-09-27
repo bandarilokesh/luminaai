@@ -1,80 +1,65 @@
 /* ============================================================
-   Lumina Ai — SPA Application Controller
+   Lumina AI - single-page app controller
    ============================================================ */
 
 const API_BASE = '/api';
 
-// ---- API Client ----
-const api = {
-    async get(path) {
-        try {
-            const r = await fetch(`${API_BASE}${path}`);
-            if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
-            return await r.json();
-        } catch (e) { console.error('API GET Error:', path, e); return null; }
-    },
-    async post(path, body) {
-        try {
-            const r = await fetch(`${API_BASE}${path}`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
-            return await r.json();
-        } catch (e) { console.error('API POST Error:', path, e); return null; }
-    },
-    async upload(path, file) {
-        try {
-            const fd = new FormData();
-            fd.append('file', file);
-            const r = await fetch(`${API_BASE}${path}`, { method: 'POST', body: fd });
-            if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
-            return await r.json();
-        } catch (e) { console.error('API Upload Error:', path, e); return null; }
-    },
-    async del(path) {
-        try {
-            const r = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
-            if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
-            return await r.json();
-        } catch (e) { console.error('API DELETE Error:', path, e); return null; }
+// ---- API client: throws Error(detail) so callers can show the server's message ----
+async function request(method, path, body, isForm = false) {
+    const opts = { method, headers: {} };
+    if (body !== undefined) {
+        if (isForm) opts.body = body;
+        else { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     }
+    const res = await fetch(`${API_BASE}${path}`, opts);
+    if (res.status === 401) { window.location.reload(); throw new Error('Access code required.'); }
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : `${res.status} ${res.statusText}`);
+    return data;
+}
+
+const api = {
+    get: (path) => request('GET', path),
+    post: (path, body) => request('POST', path, body),
+    del: (path) => request('DELETE', path),
+    upload: (path, file) => { const fd = new FormData(); fd.append('file', file); return request('POST', path, fd, true); },
 };
+
+/** Run an API call; on failure show a toast and return null. */
+async function attempt(promise) {
+    try { return await promise; } catch (e) { showToast(e.message, 'error'); return null; }
+}
 
 // ---- State ----
 const state = {
     currentPage: 'dashboard',
     selectedPapers: [],
     chatHistory: [],
+    chatBusy: false,
     quizItems: null,
     userAnswers: {},
     quizSubmitted: false,
     flashcards: null,
     cardIndex: 0,
     cardFlipped: false,
-    flashcards: null,
-    cardIndex: 0,
-    cardFlipped: false,
     researchGaps: null,
-    graphData: null,
-    comparisonData: null
+    exports: {},          // latest summary / comparison markdown, keyed by name
+    pollTimer: null,
 };
 
-// ---- Toast ----
+// ---- Helpers ----
 function showToast(message, type = 'info') {
     const t = document.createElement('div');
     t.className = `toast ${type}`;
     t.textContent = message;
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), 3000);
+    setTimeout(() => t.remove(), type === 'error' ? 6000 : 3000);
 }
 
-// ---- Time Formatting ----
 function timeAgo(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
-    const now = new Date();
-    const diff = Math.floor((now - d) / 1000);
+    const diff = Math.floor((Date.now() - d) / 1000);
     if (diff < 60) return 'Just now';
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -83,192 +68,170 @@ function timeAgo(dateStr) {
 }
 
 function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Render model Markdown safely; [n] citation markers become badges. */
+function md(text) {
+    if (!text) return '';
+    let html = (window.marked && window.DOMPurify)
+        ? DOMPurify.sanitize(marked.parse(text))
+        : `<p style="white-space:pre-wrap;">${escapeHtml(text)}</p>`;
+    return html.replace(/\[(\d{1,2})\]/g, '<sup class="cite">$1</sup>');
+}
+
+const spinner = () => '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
+const errorBox = (msg) => `<p class="body-sm text-error" style="padding:24px 0;">${escapeHtml(msg)}</p>`;
+
+function downloadAs(filename, content) {
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+}
+
+function exportMarkdown(key, filename) {
+    if (state.exports[key]) downloadAs(filename, state.exports[key]);
+}
+
+function shortTitle(title, n = 38) {
+    return escapeHtml(title.length > n ? title.substring(0, n) + '...' : title);
+}
+
+function paperChips(papers, emptyText = 'No indexed papers yet. Upload a PDF first.') {
+    if (!papers.length) return `<p class="body-sm text-muted">${emptyText}</p>`;
+    return papers.map(p => `
+        <label class="chip ${state.selectedPapers.includes(p.id) ? 'chip-active' : 'chip-default'}" style="cursor:pointer;" title="${escapeHtml(p.title)}">
+            <input type="checkbox" value="${p.id}" ${state.selectedPapers.includes(p.id) ? 'checked' : ''} style="display:none;" onchange="togglePaperSelection(this)" />
+            ${shortTitle(p.title)}
+        </label>`).join('');
+}
+
+function togglePaperSelection(checkbox) {
+    const id = checkbox.value;
+    state.selectedPapers = checkbox.checked
+        ? [...new Set([...state.selectedPapers, id])]
+        : state.selectedPapers.filter(p => p !== id);
+    checkbox.parentElement.className = `chip ${checkbox.checked ? 'chip-active' : 'chip-default'}`;
+}
+
+async function readyPapers() {
+    const papers = await attempt(api.get('/papers/')) || [];
+    const ready = papers.filter(p => p.status === 'completed');
+    const readyIds = new Set(ready.map(p => p.id));
+    state.selectedPapers = state.selectedPapers.filter(id => readyIds.has(id));
+    return ready;
 }
 
 // ---- Router ----
+const PAGES = {
+    dashboard: ['Dashboard', () => renderDashboard],
+    library: ['Library', () => renderLibrary],
+    upload: ['Upload Research', () => renderUpload],
+    qa: ['Ask Your Papers', () => renderQA],
+    summary: ['Summaries', () => renderSummary],
+    'study-tools': ['Study Tools', () => renderStudyTools],
+    'research-gaps': ['Research Gaps', () => renderResearchGaps],
+    comparison: ['Paper Comparison', () => renderComparison],
+    settings: ['Settings', () => renderSettings],
+};
+
 function navigate(page) {
-    state.currentPage = page;
-    window.location.hash = page;
-    renderPage();
-    updateActiveNav();
+    if (window.location.hash.replace('#', '') !== page) window.location.hash = page;
+    else renderPage();
 }
 
 function updateActiveNav() {
-    document.querySelectorAll('.nav-item').forEach(el => {
-        el.classList.toggle('active', el.dataset.page === state.currentPage);
-    });
-    document.querySelectorAll('.mobile-nav-item').forEach(el => {
+    document.querySelectorAll('.nav-item, .mobile-nav-item').forEach(el => {
         el.classList.toggle('active', el.dataset.page === state.currentPage);
     });
 }
 
 function renderPage() {
+    clearInterval(state.pollTimer);
     const container = document.getElementById('page-content');
-    const page = state.currentPage;
-    // Update topnav title
-    const titles = {
-        dashboard: 'Dashboard', library: 'Library', upload: 'Upload Research',
-        qa: 'QA Sessions', summary: 'Summaries', 'study-tools': 'Study Tools',
-        'research-gaps': 'Research Gaps', settings: 'Settings',
-        comparison: 'Paper Comparison'
-    };
-    document.getElementById('topnav-title').textContent = titles[page] || 'Lumina Ai';
-
-    container.innerHTML = '<div style="display:flex;justify-content:center;padding:80px 0;"><div class="spinner"></div></div>';
-
-    // Trigger fade-in animation
+    const page = PAGES[state.currentPage] ? state.currentPage : 'dashboard';
+    state.currentPage = page;
+    document.getElementById('topnav-title').textContent = PAGES[page][0];
+    container.innerHTML = spinner();
     container.classList.remove('animate-fade-in');
-    void container.offsetWidth; // Force reflow
+    void container.offsetWidth;
     container.classList.add('animate-fade-in');
-
-    const renderers = {
-        dashboard: renderDashboard,
-        library: renderLibrary,
-        upload: renderUpload,
-        qa: renderQA,
-        summary: renderSummary,
-        'study-tools': renderStudyTools,
-        'research-gaps': renderResearchGaps,
-        settings: renderSettings,
-        comparison: renderComparison
-    };
-
-    (renderers[page] || renderDashboard)(container);
+    updateActiveNav();
+    if (window.innerWidth < 1024) document.body.classList.remove('sidebar-open');
+    PAGES[page][1]()(container);
 }
 
 // ============================================================
 // PAGE: Dashboard
 // ============================================================
-async function renderDashboard(el) {
-    const [stats, activityRes, status] = await Promise.all([
-        api.get('/stats'),
-        api.get('/activity?limit=5'),
-        api.get('/status')
-    ]);
+function serviceRows(services) {
+    return services.map(s => `
+        <div class="service-row">
+            <span class="service-dot ${s.status}"></span>
+            <div style="min-width:0;">
+                <div class="label-md" style="color:var(--on-surface);">${escapeHtml(s.name)}</div>
+                <div class="label-sm text-muted truncate" title="${escapeHtml(s.detail)}">${escapeHtml(s.detail)}</div>
+            </div>
+        </div>`).join('');
+}
 
+async function renderDashboard(el) {
+    const [stats, activities, status] = await Promise.all([
+        api.get('/stats').catch(() => null),
+        api.get('/activity?limit=6').catch(() => []),
+        api.get('/status').catch(() => null),
+    ]);
     const s = stats || { total_papers: 0, questions_asked: 0, summaries_generated: 0, study_sessions: 0 };
-    const activities = activityRes?.activities || [];
+    const icons = { upload: 'upload', indexed: 'database', qa: 'question_answer', summary: 'article', quiz: 'quiz', flashcards: 'style', compare: 'compare_arrows', gaps: 'troubleshoot' };
 
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-xl);">
-        <!-- Hero -->
         <section style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:var(--sp-md);">
             <div>
-                <h2 class="headline-lg" style="color:var(--on-surface);margin-bottom:var(--sp-xs);">Welcome back.</h2>
-                <p class="body-md text-muted">Your research command center — everything at a glance.</p>
+                <h2 class="headline-lg" style="margin-bottom:var(--sp-xs);">Welcome back.</h2>
+                <p class="body-md text-muted">Upload papers, ask grounded questions, and study faster.</p>
             </div>
-            <div style="display:flex;gap:var(--sp-sm);">
-                <button class="btn-primary" onclick="navigate('upload')">
-                    <span class="material-symbols-outlined" style="font-size:18px;">upload_file</span> Quick Upload
-                </button>
-                <button class="btn-secondary" onclick="navigate('qa')">
-                    <span class="material-symbols-outlined" style="font-size:18px;">contact_support</span> Ask Question
-                </button>
+            <div style="display:flex;gap:var(--sp-sm);flex-wrap:wrap;">
+                <button class="btn-primary" onclick="navigate('upload')"><span class="material-symbols-outlined" style="font-size:18px;">upload_file</span> Upload Paper</button>
+                <button class="btn-secondary" onclick="navigate('qa')"><span class="material-symbols-outlined" style="font-size:18px;">contact_support</span> Ask a Question</button>
             </div>
         </section>
 
-        <!-- Stats Grid -->
         <section class="grid-4">
+            ${[['description', 'Papers', s.total_papers], ['psychology', 'Questions Asked', s.questions_asked],
+               ['auto_awesome', 'Summaries', s.summaries_generated], ['school', 'Study Sessions', s.study_sessions]]
+               .map(([icon, label, value]) => `
             <div class="academic-glass stat-card">
-                <div class="stat-icon" style="color:var(--primary-container);"><span class="material-symbols-outlined">description</span></div>
-                <div class="stat-value">${s.total_papers}</div>
-                <div class="stat-label">Total Papers</div>
-            </div>
-            <div class="academic-glass stat-card">
-                <div class="stat-icon" style="color:var(--tertiary);"><span class="material-symbols-outlined">psychology</span></div>
-                <div class="stat-value">${s.questions_asked}</div>
-                <div class="stat-label">Questions Asked</div>
-            </div>
-            <div class="academic-glass stat-card">
-                <div class="stat-icon" style="color:var(--secondary);"><span class="material-symbols-outlined">auto_awesome</span></div>
-                <div class="stat-value">${s.summaries_generated}</div>
-                <div class="stat-label">Summaries Generated</div>
-            </div>
-            <div class="academic-glass stat-card">
-                <div class="stat-icon" style="color:var(--primary);"><span class="material-symbols-outlined">timer</span></div>
-                <div class="stat-value">${s.study_sessions}</div>
-                <div class="stat-label">Study Sessions</div>
-            </div>
+                <div class="stat-icon" style="color:var(--primary);"><span class="material-symbols-outlined">${icon}</span></div>
+                <div class="stat-value">${value}</div>
+                <div class="stat-label">${label}</div>
+            </div>`).join('')}
         </section>
 
-        <!-- Main Grid -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xl);">
-            <!-- Left: 2 cols -->
-            <div style="grid-column: span 2;display:flex;flex-direction:column;gap:var(--sp-lg);">
-                <!-- System Status -->
-                <section>
-                    <h3 class="headline-md mb-md" style="color:var(--on-surface);">System Status</h3>
-                    <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
-                        ${status ? `
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-md);">
-                            <div>
-                                <div class="label-md text-muted" style="margin-bottom:4px;">COMPUTE</div>
-                                <div class="body-sm" style="color:var(--on-surface);">
-                                    ${status.gpu_available ? `<span style="color:var(--tertiary);">● CUDA Active</span>` : `<span style="color:var(--outline);">● CPU Only</span>`}
-                                </div>
-                                ${status.gpu_device_name ? `<div class="label-sm text-muted" style="margin-top:4px;">${escapeHtml(status.gpu_device_name)}</div>` : ''}
-                            </div>
-                            <div>
-                                <div class="label-md text-muted" style="margin-bottom:4px;">Gemini API</div>
-                                <div class="body-sm" style="color:var(--on-surface);">
-                                    ${status.provider_status === 'Connected' ? `<span style="color:var(--tertiary);">● Connected</span>` : `<span style="color:var(--error);">● Not Configured</span>`}
-                                </div>
-                                ${status.current_model ? `<div class="label-sm text-muted" style="margin-top:4px;">${status.current_model}</div>` : ''}
-                            </div>
-                            <div>
-                                <div class="label-md text-muted" style="margin-bottom:4px;">DATABASE</div>
-                                <div class="body-sm" style="color:var(--on-surface);">${(status.db_size_bytes / (1024*1024)).toFixed(2)} MB</div>
-                            </div>
-                        </div>
-                        ` : `<p class="body-sm text-error">Backend disconnected. Start the server at port 8000.</p>`}
-                    </div>
-                </section>
-
-                <!-- Quick Actions -->
-                <section>
-                    <h3 class="headline-md mb-md" style="color:var(--on-surface);">Quick Actions</h3>
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-sm);">
-                        <button class="btn-secondary" style="padding:16px;flex-direction:column;gap:8px;" onclick="navigate('library')">
-                            <span class="material-symbols-outlined" style="font-size:24px;color:var(--primary);">library_books</span>
-                            <span class="label-md">Browse Library</span>
-                        </button>
-                        <button class="btn-secondary" style="padding:16px;flex-direction:column;gap:8px;" onclick="navigate('study-tools')">
-                            <span class="material-symbols-outlined" style="font-size:24px;color:var(--tertiary);">school</span>
-                            <span class="label-md">Study Tools</span>
-                        </button>
-                        <button class="btn-secondary" style="padding:16px;flex-direction:column;gap:8px;" onclick="navigate('research-gaps')">
-                            <span class="material-symbols-outlined" style="font-size:24px;color:var(--secondary);">troubleshoot</span>
-                            <span class="label-md">Gap Detector</span>
-                        </button>
-                    </div>
-                </section>
-            </div>
-
-            <!-- Right: Activity Timeline -->
-            <div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-md);">
-                    <h3 class="headline-md" style="color:var(--on-surface);">Recent Activity</h3>
+        <div class="dashboard-grid">
+            <section>
+                <h3 class="headline-md mb-md">System Status</h3>
+                <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
+                    ${status ? `<div class="service-grid">${serviceRows(status.services)}</div>`
+                             : '<p class="body-sm text-error">Backend unreachable.</p>'}
                 </div>
-                ${activities.length ? `
+            </section>
+            <section>
+                <h3 class="headline-md mb-md">Recent Activity</h3>
+                ${activities?.length ? `
                 <div class="timeline">
-                    ${activities.map(a => {
-                        const icons = { upload: 'upload', qa: 'question_answer', summary: 'check_circle' };
-                        const icon = icons[a.event_type] || 'bookmark';
-                        return `
-                        <div class="timeline-item">
-                            <div class="timeline-dot ${a.event_type}">
-                                <span class="material-symbols-outlined">${icon}</span>
-                            </div>
-                            <div>
-                                <p class="label-md" style="color:var(--on-surface);">${escapeHtml(a.description)}</p>
-                                <p class="label-sm text-muted">${timeAgo(a.timestamp)}</p>
-                            </div>
-                        </div>`;
-                    }).join('')}
-                </div>` : '<p class="body-sm text-muted">No activity yet. Upload a paper to get started!</p>'}
-            </div>
+                    ${activities.map(a => `
+                    <div class="timeline-item">
+                        <div class="timeline-dot ${a.event_type}"><span class="material-symbols-outlined">${icons[a.event_type] || 'bookmark'}</span></div>
+                        <div style="min-width:0;">
+                            <p class="label-md" style="color:var(--on-surface);overflow-wrap:anywhere;">${escapeHtml(a.description)}</p>
+                            <p class="label-sm text-muted">${timeAgo(a.timestamp)}</p>
+                        </div>
+                    </div>`).join('')}
+                </div>` : '<p class="body-sm text-muted">No activity yet. Upload a paper to get started.</p>'}
+            </section>
         </div>
     </div>`;
 }
@@ -277,94 +240,106 @@ async function renderDashboard(el) {
 // PAGE: Library
 // ============================================================
 async function renderLibrary(el) {
-    const papers = await api.get('/papers/') || [];
+    const papers = await attempt(api.get('/papers/'));
+    if (!papers) { el.innerHTML = errorBox('Could not load the library.'); return; }
+    const sort = state.librarySort || 'recent';
+    const sorted = [...papers].sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title) : b.uploaded_at.localeCompare(a.uploaded_at));
 
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
-        <!-- Filter Bar -->
-        <section style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
-            <div style="display:flex;gap:8px;overflow-x:auto;">
-                <span class="chip chip-active">All Papers</span>
+        <section style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+            <div style="position:relative;flex:1;min-width:200px;">
+                <span class="material-symbols-outlined" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--on-surface-variant);font-size:18px;">search</span>
+                <input class="form-input" id="lib-search" style="padding-left:44px;" placeholder="Search titles and authors..." />
             </div>
-            <div style="display:flex;align-items:center;gap:12px;">
-                <span class="label-sm text-muted" style="text-transform:uppercase;letter-spacing:0.05em;">Sort by</span>
-                <select class="form-select" id="lib-sort" style="width:auto;min-width:150px;">
-                    <option value="recent">Recently Added</option>
-                    <option value="title">Title</option>
-                    <option value="year">Year</option>
-                </select>
-            </div>
+            <select class="form-select" id="lib-sort" style="width:auto;min-width:160px;">
+                <option value="recent" ${sort === 'recent' ? 'selected' : ''}>Recently added</option>
+                <option value="title" ${sort === 'title' ? 'selected' : ''}>Title</option>
+            </select>
         </section>
-
-        <!-- Search -->
-        <div style="position:relative;">
-            <span class="material-symbols-outlined" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--on-surface-variant);font-size:18px;">search</span>
-            <input class="form-input" id="lib-search" style="padding-left:44px;" placeholder="Search papers, authors, tags..." />
-        </div>
-
-        <!-- Cards Grid -->
         <div class="grid-cards" id="lib-grid">
-            ${papers.map(p => renderPaperCard(p)).join('')}
+            ${sorted.map(renderPaperCard).join('')}
             <div class="empty-state" onclick="navigate('upload')">
                 <div class="empty-icon"><span class="material-symbols-outlined" style="font-size:32px;color:var(--primary);">add_notes</span></div>
                 <h3 class="headline-md text-muted" style="margin-bottom:4px;">Upload New Paper</h3>
-                <p class="body-sm text-muted" style="opacity:0.5;">Import PDFs to start analyzing.</p>
+                <p class="body-sm text-muted" style="opacity:0.6;">PDFs are chunked, embedded and stored in Qdrant.</p>
             </div>
         </div>
     </div>`;
 
-    // Search filter
-    document.getElementById('lib-search')?.addEventListener('input', (e) => {
+    document.getElementById('lib-search').addEventListener('input', (e) => {
         const term = e.target.value.toLowerCase();
         document.querySelectorAll('.paper-card').forEach(card => {
-            const text = card.textContent.toLowerCase();
-            card.style.display = text.includes(term) ? 'flex' : 'none';
+            card.style.display = card.textContent.toLowerCase().includes(term) ? '' : 'none';
         });
     });
+    document.getElementById('lib-sort').addEventListener('change', (e) => { state.librarySort = e.target.value; renderLibrary(el); });
+
+    // Refresh while papers are still indexing.
+    if (papers.some(p => p.status === 'uploaded' || p.status === 'indexing')) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = setInterval(async () => {
+            if (state.currentPage !== 'library') return clearInterval(state.pollTimer);
+            const fresh = await api.get('/papers/').catch(() => null);
+            if (fresh && !fresh.some(p => p.status === 'uploaded' || p.status === 'indexing')) {
+                clearInterval(state.pollTimer);
+                renderLibrary(el);
+            }
+        }, 2500);
+    }
 }
 
 function renderPaperCard(p) {
-    const statusClass = p.status || 'pending';
-    const statusText = p.status === 'completed' ? 'Analyzed' : (p.status || 'Pending');
-    const year = p.publication_year || 'N/A';
-    const sizeMB = (p.file_size / (1024 * 1024)).toFixed(2);
-
+    const labels = { completed: 'Ready', indexing: 'Indexing...', uploaded: 'Queued', failed: 'Failed' };
+    const ready = p.status === 'completed';
     return `
     <article class="paper-card" data-id="${p.id}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
-            <span class="status-badge ${statusClass}"><span class="dot"></span>${escapeHtml(statusText)}</span>
-            <button class="btn-icon" style="width:32px;height:32px;border:none;" onclick="deletePaper('${p.id}')" title="Delete">
+            <span class="status-badge ${escapeHtml(p.status)}"><span class="dot"></span>${labels[p.status] || escapeHtml(p.status)}</span>
+            <button class="btn-icon" style="width:32px;height:32px;border:none;" onclick="deletePaper('${p.id}')" title="Delete" aria-label="Delete paper">
                 <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
             </button>
         </div>
         <h3 class="paper-title">${escapeHtml(p.title)}</h3>
-        <p class="paper-authors">${escapeHtml(p.authors || 'Unknown authors')}</p>
+        <p class="paper-authors">${escapeHtml(p.authors || p.file_name)}</p>
+        ${p.status === 'failed' ? `<p class="body-sm text-error" style="margin-bottom:12px;">${escapeHtml(p.error_message || 'Indexing failed.')}</p>` : ''}
         <div class="paper-meta">
-            <div><span class="meta-label">Year</span><span class="meta-value">${year}</span></div>
-            <div><span class="meta-label">Size</span><span class="meta-value">${sizeMB} MB</span></div>
+            <div><span class="meta-label">Pages</span><span class="meta-value">${p.page_count || '-'}</span></div>
+            <div><span class="meta-label">Chunks</span><span class="meta-value">${p.chunk_count || '-'}</span></div>
+            <div><span class="meta-label">Size</span><span class="meta-value">${(p.file_size / 1048576).toFixed(1)} MB</span></div>
+            <div><span class="meta-label">Added</span><span class="meta-value">${timeAgo(p.uploaded_at)}</span></div>
         </div>
         <div class="paper-actions">
+            ${ready ? `
             <button class="btn-open" onclick="selectPaperAndGo('${p.id}', 'qa')"><span class="material-symbols-outlined" style="font-size:16px;">chat_bubble</span> Chat</button>
-            <button class="btn-icon" title="Summarize" onclick="selectPaperAndGo('${p.id}', 'summary')"><span class="material-symbols-outlined">summarize</span></button>
-            <button class="btn-icon" title="Quiz" onclick="selectPaperAndGo('${p.id}', 'study-tools')"><span class="material-symbols-outlined">quiz</span></button>
+            <button class="btn-icon" title="Summarize" aria-label="Summarize" onclick="selectPaperAndGo('${p.id}', 'summary')"><span class="material-symbols-outlined">summarize</span></button>
+            <button class="btn-icon" title="Study tools" aria-label="Study tools" onclick="selectPaperAndGo('${p.id}', 'study-tools')"><span class="material-symbols-outlined">quiz</span></button>`
+            : p.status === 'failed' ? `
+            <button class="btn-open" onclick="reindexPaper('${p.id}')"><span class="material-symbols-outlined" style="font-size:16px;">refresh</span> Retry indexing</button>`
+            : '<span class="body-sm text-muted">Embedding and storing chunks...</span>'}
         </div>
     </article>`;
 }
 
 async function deletePaper(id) {
-    if (!confirm('Delete this paper? This will remove the PDF, vectors, and all cached data.')) return;
-    const res = await api.del(`/papers/${id}`);
-    if (res?.success) {
-        showToast('Paper deleted successfully.', 'success');
+    if (!confirm('Delete this paper? Its PDF, vectors in Qdrant and cached summaries will be removed.')) return;
+    if (await attempt(api.del(`/papers/${id}`))) {
+        showToast('Paper deleted.', 'success');
         state.selectedPapers = state.selectedPapers.filter(p => p !== id);
         renderPage();
-    } else {
-        showToast('Failed to delete paper.', 'error');
+    }
+}
+
+async function reindexPaper(id) {
+    if (await attempt(api.post(`/papers/${id}/reindex`))) {
+        showToast('Re-indexing started.', 'info');
+        renderPage();
     }
 }
 
 function selectPaperAndGo(id, page) {
-    if (!state.selectedPapers.includes(id)) state.selectedPapers.push(id);
+    state.selectedPapers = [id];
+    state.summaryPaper = id;
     navigate(page);
 }
 
@@ -373,283 +348,199 @@ function selectPaperAndGo(id, page) {
 // ============================================================
 function renderUpload(el) {
     el.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;">
+    <div style="display:flex;justify-content:center;padding-top:24px;">
         <div style="width:100%;max-width:700px;">
-            <!-- Drop Zone -->
-            <div id="upload-dropzone-section">
-                <div style="text-align:center;margin-bottom:32px;">
-                    <h2 class="headline-lg mb-sm">Ingest New Research</h2>
-                    <p class="body-md text-muted">Our AI extracts entities, citations, and key claims instantly.</p>
-                </div>
-                <div class="drop-zone" id="upload-dropzone">
-                    <input type="file" accept=".pdf" id="upload-file-input" />
-                    <div class="upload-icon"><span class="material-symbols-outlined" style="font-size:40px;color:var(--primary);">cloud_upload</span></div>
-                    <h3 class="headline-md mb-sm">Drag and drop your paper here</h3>
-                    <p class="body-sm text-muted mb-md">Or click to browse from your computer</p>
-                    <div class="file-type-badges">
-                        <div class="file-type-badge"><span class="material-symbols-outlined" style="font-size:16px;color:var(--primary);">picture_as_pdf</span> PDF</div>
-                    </div>
-                    <p class="label-sm text-muted" style="margin-top:32px;opacity:0.5;">Maximum file size: 50MB</p>
-                </div>
+            <div style="text-align:center;margin-bottom:32px;">
+                <h2 class="headline-lg mb-sm">Add Research Papers</h2>
+                <p class="body-md text-muted">Each PDF is loaded, cleaned, split into chunks, embedded with Jina AI and stored in Qdrant.</p>
             </div>
-
-            <!-- Processing State -->
-            <div id="upload-processing" class="hidden">
-                <div class="processing-card">
-                    <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:32px;">
-                        <div style="width:48px;height:48px;border-radius:var(--radius-lg);background:rgba(195,192,255,0.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                            <span class="material-symbols-outlined" style="color:var(--primary);">upload_file</span>
-                        </div>
-                        <div style="flex:1;">
-                            <h3 class="headline-md mb-xs" id="upload-filename">file.pdf</h3>
-                            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                                <span class="label-md text-primary" style="text-transform:uppercase;letter-spacing:0.1em;" id="upload-status-label">Uploading...</span>
-                                <span class="label-md text-muted" id="upload-percent">0%</span>
-                            </div>
-                            <div class="progress-bar-bg"><div class="progress-bar-fill" id="upload-progress" style="width:0%"></div></div>
-                        </div>
-                    </div>
-                    <div class="grid-3">
-                        <div style="padding:16px;border-radius:var(--radius-lg);background:rgba(11,19,38,0.5);border:1px solid rgba(70,69,85,0.05);">
-                            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                                <span class="label-sm text-muted">Extraction</span>
-                                <span class="material-symbols-outlined processing-pulse" style="font-size:14px;color:var(--primary);">cached</span>
-                            </div>
-                            <p class="body-sm">Parsing entities...</p>
-                        </div>
-                        <div style="padding:16px;border-radius:var(--radius-lg);background:rgba(11,19,38,0.5);border:1px solid rgba(70,69,85,0.05);">
-                            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                                <span class="label-sm text-muted">Chunking</span>
-                                <span class="material-symbols-outlined" style="font-size:14px;color:rgba(199,196,216,0.3);">pending</span>
-                            </div>
-                            <p class="body-sm text-muted">Waiting...</p>
-                        </div>
-                        <div style="padding:16px;border-radius:var(--radius-lg);background:rgba(11,19,38,0.5);border:1px solid rgba(70,69,85,0.05);">
-                            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                                <span class="label-sm text-muted">Indexing</span>
-                                <span class="material-symbols-outlined" style="font-size:14px;color:rgba(199,196,216,0.3);">pending</span>
-                            </div>
-                            <p class="body-sm text-muted">Waiting...</p>
-                        </div>
-                    </div>
-                </div>
+            <div class="drop-zone" id="upload-dropzone">
+                <input type="file" accept=".pdf,application/pdf" multiple id="upload-file-input" aria-label="Choose PDF files" />
+                <div class="upload-icon"><span class="material-symbols-outlined" style="font-size:40px;color:var(--primary);">cloud_upload</span></div>
+                <h3 class="headline-md mb-sm">Drag and drop PDFs here</h3>
+                <p class="body-sm text-muted mb-md">or click to browse</p>
+                <div class="file-type-badges"><div class="file-type-badge"><span class="material-symbols-outlined" style="font-size:16px;color:var(--primary);">picture_as_pdf</span> PDF, up to 50 MB</div></div>
             </div>
-
-            <!-- Success State -->
-            <div id="upload-success" class="hidden">
-                <div style="text-align:center;margin-bottom:32px;">
-                    <div style="width:64px;height:64px;background:rgba(74,225,118,0.2);color:var(--tertiary);border-radius:var(--radius-full);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
-                        <span class="material-symbols-outlined" style="font-size:32px;">check_circle</span>
-                    </div>
-                    <h2 class="headline-lg mb-sm">Upload Complete</h2>
-                    <p class="body-md text-muted">Paper has been uploaded and indexing has started in the background.</p>
-                </div>
-                <div id="upload-result-meta"></div>
-                <div style="display:flex;justify-content:center;gap:16px;margin-top:32px;">
-                    <button class="btn-secondary" onclick="resetUpload()"><span class="material-symbols-outlined" style="font-size:18px;">add</span> Upload Another</button>
-                    <button class="btn-primary" onclick="navigate('library')"><span class="material-symbols-outlined" style="font-size:18px;">library_books</span> View Library</button>
-                </div>
-            </div>
+            <div id="upload-list" style="display:flex;flex-direction:column;gap:12px;margin-top:24px;"></div>
         </div>
     </div>`;
 
-    // Wire up drag-and-drop
     const dropzone = document.getElementById('upload-dropzone');
-    const fileInput = document.getElementById('upload-file-input');
+    ['dragenter', 'dragover'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag-over'); }));
+    ['dragleave', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag-over'); }));
+    dropzone.addEventListener('drop', e => [...e.dataTransfer.files].forEach(handleUpload));
+    document.getElementById('upload-file-input').addEventListener('change', e => { [...e.target.files].forEach(handleUpload); e.target.value = ''; });
+}
 
-    ['dragenter', 'dragover'].forEach(ev => {
-        dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-    });
-    ['dragleave', 'drop'].forEach(ev => {
-        dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag-over'); });
-    });
-    dropzone.addEventListener('drop', e => { if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]); });
-    fileInput.addEventListener('change', e => { if (e.target.files.length) handleUpload(e.target.files[0]); });
+function uploadRow(rowId, name, status, detail) {
+    const icons = { uploading: 'upload', uploaded: 'schedule', indexing: 'cached', completed: 'check_circle', failed: 'error' };
+    const labels = { uploading: 'Uploading', uploaded: 'Queued', indexing: 'Chunking, embedding & storing', completed: 'Ready', failed: 'Failed' };
+    const spin = status === 'uploading' || status === 'indexing' || status === 'uploaded';
+    return `
+    <div class="academic-glass upload-row" id="${rowId}">
+        <span class="material-symbols-outlined ${spin ? 'processing-pulse' : ''}" style="color:${status === 'failed' ? 'var(--error)' : 'var(--primary)'};">${icons[status]}</span>
+        <div style="flex:1;min-width:0;">
+            <div class="label-md truncate" style="color:var(--on-surface);">${escapeHtml(name)}</div>
+            <div class="label-sm ${status === 'failed' ? 'text-error' : 'text-muted'}">${escapeHtml(detail || labels[status])}</div>
+        </div>
+        ${status === 'completed' ? `<button class="btn-secondary" style="padding:6px 12px;" onclick="navigate('library')">Open library</button>` : ''}
+    </div>`;
 }
 
 async function handleUpload(file) {
-    document.getElementById('upload-dropzone-section').classList.add('hidden');
-    document.getElementById('upload-processing').classList.remove('hidden');
-    document.getElementById('upload-filename').textContent = file.name;
+    const list = document.getElementById('upload-list');
+    const rowId = `up-${Math.random().toString(36).slice(2)}`;
+    list.insertAdjacentHTML('afterbegin', uploadRow(rowId, file.name, 'uploading'));
+    const setRow = (status, detail) => {
+        const row = document.getElementById(rowId);
+        if (row) row.outerHTML = uploadRow(rowId, file.name, status, detail);
+    };
 
-    // Simulate progress
-    const progressBar = document.getElementById('upload-progress');
-    const percentLabel = document.getElementById('upload-percent');
-    const statusLabel = document.getElementById('upload-status-label');
-    let progress = 0;
-    const interval = setInterval(() => {
-        progress += Math.floor(Math.random() * 15) + 5;
-        if (progress > 90) progress = 90;
-        progressBar.style.width = progress + '%';
-        percentLabel.textContent = progress + '%';
-        if (progress > 40) statusLabel.textContent = 'Analyzing PDF...';
-        if (progress > 70) statusLabel.textContent = 'Processing...';
-    }, 300);
+    if (!file.name.toLowerCase().endsWith('.pdf')) return setRow('failed', 'Only PDF files are supported.');
+    let paper;
+    try { paper = await api.upload('/papers/upload', file); }
+    catch (e) { return setRow('failed', e.message); }
 
-    const result = await api.upload('/papers/upload', file);
-    clearInterval(interval);
-
-    progressBar.style.width = '100%';
-    percentLabel.textContent = '100%';
-    statusLabel.textContent = 'Complete!';
-
-    setTimeout(() => {
-        document.getElementById('upload-processing').classList.add('hidden');
-        document.getElementById('upload-success').classList.remove('hidden');
-
-        if (result) {
-            document.getElementById('upload-result-meta').innerHTML = `
-            <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-                    <span class="status-badge ${result.status}"><span class="dot"></span>${result.status}</span>
-                    <span class="label-sm text-muted">ID: ${result.id.substring(0, 8)}...</span>
-                </div>
-                <h3 class="headline-md mb-sm">${escapeHtml(result.title)}</h3>
-                <p class="body-sm text-muted">${escapeHtml(result.authors || 'Extracting...')}</p>
-            </div>`;
-        }
-    }, 800);
-}
-
-function resetUpload() {
-    document.getElementById('upload-success').classList.add('hidden');
-    document.getElementById('upload-dropzone-section').classList.remove('hidden');
-    document.getElementById('upload-progress').style.width = '0%';
-    document.getElementById('upload-percent').textContent = '0%';
-    document.getElementById('upload-status-label').textContent = 'Uploading...';
+    // Poll until the background indexing pipeline finishes.
+    for (;;) {
+        setRow(paper.status, paper.status === 'completed' ? `${paper.page_count} pages, ${paper.chunk_count} chunks indexed` : paper.error_message);
+        if (paper.status === 'completed' || paper.status === 'failed') break;
+        await new Promise(r => setTimeout(r, 1500));
+        try { paper = await api.get(`/papers/${paper.id}`); } catch { break; }
+    }
+    if (paper.status === 'completed') showToast(`"${paper.title.substring(0, 40)}" is ready.`, 'success');
 }
 
 // ============================================================
-// PAGE: QA Chat
+// PAGE: QA chat (streamed)
 // ============================================================
 async function renderQA(el) {
-    const papers = await api.get('/papers/') || [];
-    const completedPapers = papers.filter(p => p.status === 'completed');
-
+    const papers = await readyPapers();
     el.innerHTML = `
-    <div style="display:flex;flex-direction:column;height:calc(100vh - 200px);">
-        <!-- Paper selector -->
+    <div class="qa-layout">
         <div style="margin-bottom:var(--sp-md);">
-            <label class="form-label">SELECT PAPERS TO QUERY</label>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;" id="qa-paper-chips">
-                ${completedPapers.length ? completedPapers.map(p => `
-                    <label class="chip ${state.selectedPapers.includes(p.id) ? 'chip-active' : 'chip-default'}" style="cursor:pointer;">
-                        <input type="checkbox" value="${p.id}" ${state.selectedPapers.includes(p.id) ? 'checked' : ''} style="display:none;" onchange="togglePaperSelection(this)" />
-                        ${escapeHtml(p.title.substring(0, 40))}${p.title.length > 40 ? '...' : ''}
-                    </label>
-                `).join('') : '<p class="body-sm text-muted">No papers indexed yet. Upload papers first.</p>'}
-            </div>
+            <label class="form-label">PAPERS TO SEARCH <span class="text-muted" style="text-transform:none;letter-spacing:0;">(none selected = whole library)</span></label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${paperChips(papers)}</div>
         </div>
-
-        <!-- Chat Messages -->
-        <div style="flex:1;overflow-y:auto;padding-bottom:180px;" class="custom-scrollbar" id="qa-messages">
-            ${state.chatHistory.length === 0 ? `
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;opacity:0.5;">
-                    <span class="material-symbols-outlined" style="font-size:48px;color:var(--outline);margin-bottom:16px;">chat_bubble</span>
-                    <p class="body-md text-muted">Ask a question about your selected papers</p>
-                </div>
-            ` : state.chatHistory.map(msg => renderChatMessage(msg)).join('')}
+        <div class="custom-scrollbar qa-messages" id="qa-messages">
+            ${state.chatHistory.length ? state.chatHistory.map(renderChatMessage).join('') : `
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;opacity:0.6;text-align:center;">
+                <span class="material-symbols-outlined" style="font-size:48px;color:var(--on-surface-variant);margin-bottom:16px;">chat_bubble</span>
+                <p class="body-md text-muted">Answers are grounded in your papers and cite their sources.</p>
+            </div>`}
         </div>
-
-        <!-- Suggested Chips -->
         ${state.chatHistory.length === 0 ? `
-        <div class="suggested-chips" style="margin-bottom:8px;">
-            <button class="suggested-chip" onclick="askSuggested('Summarize key findings')"><span class="material-symbols-outlined" style="font-size:16px;">summarize</span>Summarize key findings</button>
-            <button class="suggested-chip" onclick="askSuggested('Explain the methodology')"><span class="material-symbols-outlined" style="font-size:16px;">science</span>Explain methodology</button>
-            <button class="suggested-chip" onclick="askSuggested('What datasets were used?')"><span class="material-symbols-outlined" style="font-size:16px;">dataset</span>What datasets?</button>
+        <div class="suggested-chips" style="margin:8px 0;">
+            ${['Summarize the key findings', 'Explain the methodology', 'What datasets were used?', 'What are the limitations?']
+                .map(q => `<button class="suggested-chip" onclick="askSuggested(this.textContent.trim())">${q}</button>`).join('')}
         </div>` : ''}
-
-        <!-- Input -->
-        <div style="background:linear-gradient(to top, var(--surface) 60%, transparent);padding-top:24px;">
-            <div class="chat-input-box" style="position:relative;left:auto;right:auto;">
-                <div class="input-inner">
-                    <textarea id="qa-input" rows="1" placeholder="Ask a question about your papers..."
-                        oninput="this.style.height='';this.style.height=this.scrollHeight+'px'"
-                        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendQuestion();}"></textarea>
-                    <button class="send-btn" onclick="sendQuestion()">
-                        <span class="material-symbols-outlined" style="font-variation-settings:'wght' 700;">arrow_upward</span>
-                    </button>
-                </div>
+        <div class="chat-input-box" style="position:relative;left:auto;right:auto;margin-top:8px;">
+            <div class="input-inner">
+                <textarea id="qa-input" rows="1" placeholder="Ask a question about your papers..." aria-label="Question"
+                    oninput="this.style.height='';this.style.height=this.scrollHeight+'px'"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendQuestion();}"></textarea>
+                <button class="send-btn" onclick="sendQuestion()" aria-label="Send" ${state.chatBusy ? 'disabled' : ''}>
+                    <span class="material-symbols-outlined" style="font-variation-settings:'wght' 700;">arrow_upward</span>
+                </button>
             </div>
-            ${state.chatHistory.length > 0 ? `<div style="text-align:center;margin-top:8px;"><button class="btn-secondary" style="font-size:11px;padding:4px 12px;" onclick="clearChat()">Clear Chat</button></div>` : ''}
         </div>
+        ${state.chatHistory.length ? `<div style="text-align:center;margin-top:8px;"><button class="btn-secondary" style="font-size:11px;padding:4px 12px;" onclick="clearChat()">Clear chat</button></div>` : ''}
     </div>`;
+    scrollChat();
+}
 
-    // Scroll to bottom
+function scrollChat() {
     const msgs = document.getElementById('qa-messages');
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
 }
 
-function renderChatMessage(msg) {
+function renderChatMessage(msg, index) {
     if (msg.role === 'user') {
         return `
-        <div class="chat-message" style="margin-bottom:48px;">
+        <div class="chat-message" style="margin-bottom:32px;">
             <div class="chat-avatar user"><span class="material-symbols-outlined" style="color:var(--primary);font-size:20px;">person</span></div>
-            <div class="chat-content"><p class="body-lg" style="color:var(--on-surface);">${escapeHtml(msg.content)}</p></div>
+            <div class="chat-content"><p class="body-lg" style="color:var(--on-surface);white-space:pre-wrap;">${escapeHtml(msg.content)}</p></div>
         </div>`;
     }
-
-    // AI message
     const citations = msg.citations || [];
-    const conf = msg.confidence ? Math.round(msg.confidence * 100) : null;
-
+    const score = typeof msg.score === 'number' && citations.length ? Math.round(msg.score * 100) : null;
     return `
-    <div class="chat-message ai-accent-border" style="margin-bottom:48px;">
+    <div class="chat-message ai-accent-border" style="margin-bottom:32px;" id="msg-${index}">
         <div class="chat-avatar ai"><span class="material-symbols-outlined" style="color:var(--on-secondary-container);font-size:20px;">smart_toy</span></div>
-        <div class="chat-content" style="display:flex;flex-direction:column;gap:24px;">
-            ${conf !== null ? `<div class="confidence-badge"><span class="dot"></span>${conf}% confidence</div>` : ''}
-            <div class="body-md" style="color:rgba(218,226,253,0.9);line-height:1.7;white-space:pre-wrap;">${escapeHtml(msg.content)}</div>
+        <div class="chat-content" style="display:flex;flex-direction:column;gap:16px;min-width:0;">
+            ${score !== null ? `<div class="confidence-badge" title="Average cosine similarity of the retrieved chunks"><span class="dot"></span>${score}% retrieval match</div>` : ''}
+            <div class="markdown body-md ${msg.error ? 'text-error' : ''}" data-answer>${msg.content ? md(msg.content) : (msg.streaming ? '<div class="typing-indicator"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>' : '')}</div>
             ${citations.length ? `
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                ${citations.map((c, i) => `
-                <div class="citation-card">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
-                        <span class="citation-tag">Citation ${String(i + 1).padStart(2, '0')}</span>
-                    </div>
-                    <h4 class="label-md mb-xs" style="color:var(--on-surface);">${escapeHtml(c.paper_name)}</h4>
-                    <p class="label-sm text-muted mb-sm">Page ${c.page} • Section: ${escapeHtml(c.section || 'N/A')}</p>
-                    <div class="citation-snippet"><p>${escapeHtml(c.text_snippet)}</p></div>
-                </div>`).join('')}
-            </div>` : ''}
+            <details class="citations">
+                <summary class="label-md text-muted">${citations.length} source${citations.length > 1 ? 's' : ''}</summary>
+                <div class="citation-grid">
+                    ${citations.map((c, i) => `
+                    <div class="citation-card">
+                        <span class="citation-tag">[${i + 1}] ${Math.round(c.score * 100)}% match</span>
+                        <h4 class="label-md mb-xs" style="color:var(--on-surface);margin-top:8px;">${escapeHtml(c.paper_name)}</h4>
+                        <p class="label-sm text-muted mb-sm">Page ${c.page} · ${escapeHtml(c.section || 'Unknown section')}</p>
+                        <div class="citation-snippet"><p>${escapeHtml(c.text_snippet.length > 600 ? c.text_snippet.substring(0, 600) + '...' : c.text_snippet)}</p></div>
+                    </div>`).join('')}
+                </div>
+            </details>` : ''}
         </div>
     </div>`;
-}
-
-function togglePaperSelection(checkbox) {
-    const id = checkbox.value;
-    if (checkbox.checked) {
-        if (!state.selectedPapers.includes(id)) state.selectedPapers.push(id);
-    } else {
-        state.selectedPapers = state.selectedPapers.filter(p => p !== id);
-    }
-    // Update chip style
-    const label = checkbox.parentElement;
-    label.className = `chip ${checkbox.checked ? 'chip-active' : 'chip-default'}`;
 }
 
 async function sendQuestion() {
     const input = document.getElementById('qa-input');
     const question = input?.value?.trim();
-    if (!question || !state.selectedPapers.length) {
-        if (!state.selectedPapers.length) showToast('Please select at least one paper first.', 'info');
-        return;
-    }
+    if (!question || state.chatBusy) return;
 
+    state.chatBusy = true;
     state.chatHistory.push({ role: 'user', content: question });
-    input.value = '';
-    input.style.height = '';
+    const msg = { role: 'assistant', content: '', citations: [], streaming: true };
+    state.chatHistory.push(msg);
+    const index = state.chatHistory.length - 1;
     renderPage();
 
-    const res = await api.post('/qa', { paper_ids: state.selectedPapers, question });
-    if (res) {
-        state.chatHistory.push({
-            role: 'assistant', content: res.answer,
-            citations: res.citations, confidence: res.confidence_score
+    const refresh = (full = false) => {
+        const node = document.getElementById(`msg-${index}`);
+        if (!node) return;
+        if (full) node.outerHTML = renderChatMessage(msg, index);
+        else node.querySelector('[data-answer]').innerHTML = md(msg.content);
+        scrollChat();
+    };
+
+    try {
+        const res = await fetch(`${API_BASE}/qa/stream`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, paper_ids: state.selectedPapers }),
         });
-    } else {
-        state.chatHistory.push({ role: 'assistant', content: 'Failed to process query. Please check the backend connection.' });
+        if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.detail || `${res.status} ${res.statusText}`);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split('\n\n');
+            buffer = events.pop();
+            for (const raw of events) {
+                if (!raw.startsWith('data: ')) continue;
+                const event = JSON.parse(raw.slice(6));
+                if (event.type === 'meta') { msg.citations = event.citations; msg.score = event.retrieval_score; refresh(true); }
+                else if (event.type === 'token') { msg.content += event.text; refresh(); }
+                else if (event.type === 'error') throw new Error(event.message);
+            }
+        }
+    } catch (e) {
+        msg.error = true;
+        msg.content = (msg.content ? msg.content + '\n\n' : '') + `Error: ${e.message}`;
     }
-    renderPage();
+    msg.streaming = false;
+    state.chatBusy = false;
+    if (state.currentPage === 'qa') refresh(true);
+    document.querySelector('.send-btn')?.removeAttribute('disabled');
 }
 
 function askSuggested(q) {
@@ -665,134 +556,105 @@ function clearChat() {
 // ============================================================
 // PAGE: Summary
 // ============================================================
-async function renderSummary(el) {
-    const papers = await api.get('/papers/') || [];
-    const completedPapers = papers.filter(p => p.status === 'completed');
+const SUMMARY_TYPES = {
+    abstract: 'Abstract', methodology: 'Methodology', results: 'Results', conclusion: 'Conclusion',
+    beginner: 'Beginner friendly (ELI5)', technical: 'Technical deep-dive', bullet: 'Bullet points', 'one-page': 'One-page brief',
+};
 
+async function renderSummary(el) {
+    const papers = await readyPapers();
+    const selected = state.summaryPaper || state.selectedPapers[0];
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
         <div>
             <h2 class="headline-lg mb-xs">Generate Summaries</h2>
-            <p class="body-md text-muted">Create multi-perspective summaries from your research papers.</p>
+            <p class="body-md text-muted">Each summary style retrieves the most relevant chunks of the paper and summarizes only those.</p>
         </div>
         <div class="grid-2">
             <div>
-                <label class="form-label">SELECT PAPER</label>
+                <label class="form-label" for="summary-paper">PAPER</label>
                 <select class="form-select" id="summary-paper">
-                    ${completedPapers.length ? completedPapers.map(p => `<option value="${p.id}">${escapeHtml(p.title)}</option>`).join('') : '<option disabled>No papers available</option>'}
+                    ${papers.length ? papers.map(p => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${escapeHtml(p.title)}</option>`).join('') : '<option disabled selected>No indexed papers</option>'}
                 </select>
             </div>
             <div>
-                <label class="form-label">SUMMARY TYPE</label>
+                <label class="form-label" for="summary-type">SUMMARY TYPE</label>
                 <select class="form-select" id="summary-type">
-                    <option value="abstract">Abstract</option>
-                    <option value="methodology">Methodology</option>
-                    <option value="results">Results</option>
-                    <option value="conclusion">Conclusion</option>
-                    <option value="beginner">Beginner Friendly</option>
-                    <option value="technical">Technical Deep-Dive</option>
-                    <option value="bullet">Bullet Points</option>
-                    <option value="one-page">One-Page Brief</option>
+                    ${Object.entries(SUMMARY_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
                 </select>
             </div>
         </div>
-        <button class="btn-primary" style="align-self:flex-start;" onclick="generateSummary()">
-            <span class="material-symbols-outlined" style="font-size:18px;">auto_awesome</span> Generate Summary
-        </button>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <button class="btn-primary" onclick="generateSummary(false)"><span class="material-symbols-outlined" style="font-size:18px;">auto_awesome</span> Generate Summary</button>
+            <button class="btn-secondary" onclick="generateSummary(true)" title="Ignore the cached version">Regenerate</button>
+        </div>
         <div id="summary-result"></div>
     </div>`;
 }
 
-async function generateSummary() {
+async function generateSummary(refresh) {
     const paperId = document.getElementById('summary-paper')?.value;
     const summaryType = document.getElementById('summary-type')?.value;
-    if (!paperId) return showToast('Select a paper first.', 'info');
-
+    if (!paperId || paperId === 'No indexed papers') return showToast('Upload and index a paper first.', 'info');
+    state.summaryPaper = paperId;
     const resultEl = document.getElementById('summary-result');
-    resultEl.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
-
-    const res = await api.post('/summary', { paper_id: paperId, summary_type: summaryType });
-    if (res?.summary_text) {
+    resultEl.innerHTML = spinner();
+    try {
+        const res = await api.post('/summary', { paper_id: paperId, summary_type: summaryType, refresh });
+        state.exports.summary = res.summary_text;
         resultEl.innerHTML = `
         <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-md);">
-                <h3 class="headline-md">Summary — ${escapeHtml(summaryType.replace('_', ' '))}</h3>
-                <span class="label-sm text-muted">${res.latency_sec?.toFixed(1)}s</span>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-md);gap:12px;flex-wrap:wrap;">
+                <h3 class="headline-md">${SUMMARY_TYPES[summaryType]}</h3>
+                <span class="label-sm text-muted">${res.cached ? 'cached' : `${res.latency_sec.toFixed(1)}s`}</span>
             </div>
-            <div class="body-md" style="line-height:1.8;white-space:pre-wrap;color:rgba(218,226,253,0.9);">${escapeHtml(res.summary_text)}</div>
-            <div style="display:flex;gap:12px;margin-top:var(--sp-md);padding-top:var(--sp-md);border-top:1px solid rgba(70,69,85,0.1);">
-                <button class="btn-secondary" onclick="downloadAs('${escapeHtml(summaryType)}_summary.md', \`${res.summary_text.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">
-                    <span class="material-symbols-outlined" style="font-size:16px;">download</span> Export MD
-                </button>
+            <div class="markdown body-md">${md(res.summary_text)}</div>
+            <div class="result-actions">
+                <button class="btn-secondary" onclick="exportMarkdown('summary', '${summaryType}_summary.md')"><span class="material-symbols-outlined" style="font-size:16px;">download</span> Export MD</button>
             </div>
         </div>`;
-    } else {
-        resultEl.innerHTML = '<p class="body-sm text-error" style="padding:24px;">Failed to generate summary.</p>';
-    }
-}
-
-function downloadAs(filename, content) {
-    const blob = new Blob([content], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    } catch (e) { resultEl.innerHTML = errorBox(e.message); }
 }
 
 // ============================================================
-// PAGE: Study Tools
+// PAGE: Study tools
 // ============================================================
 async function renderStudyTools(el) {
-    const papers = await api.get('/papers/') || [];
-    const completedPapers = papers.filter(p => p.status === 'completed');
-
+    const papers = await readyPapers();
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
         <div>
             <h2 class="headline-lg mb-xs">Study Tools</h2>
-            <p class="body-md text-muted">Generate quizzes and flashcards from your research papers.</p>
+            <p class="body-md text-muted">Quizzes and flashcards generated from chunks spread across the whole paper.</p>
         </div>
-
-        <!-- Paper selector -->
         <div>
             <label class="form-label">SELECT PAPERS</label>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;" id="study-paper-chips">
-                ${completedPapers.map(p => `
-                    <label class="chip ${state.selectedPapers.includes(p.id) ? 'chip-active' : 'chip-default'}" style="cursor:pointer;">
-                        <input type="checkbox" value="${p.id}" ${state.selectedPapers.includes(p.id) ? 'checked' : ''} style="display:none;" onchange="togglePaperSelection(this)" />
-                        ${escapeHtml(p.title.substring(0, 35))}${p.title.length > 35 ? '...' : ''}
-                    </label>
-                `).join('') || '<p class="body-sm text-muted">No papers available.</p>'}
-            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${paperChips(papers)}</div>
         </div>
-
-        <!-- Tabs -->
-        <div style="display:flex;gap:8px;border-bottom:1px solid rgba(70,69,85,0.1);padding-bottom:8px;">
-            <button class="chip chip-active" id="tab-quiz" onclick="showStudyTab('quiz')">📝 Quiz Generator</button>
-            <button class="chip chip-default" id="tab-flash" onclick="showStudyTab('flash')">🗂️ Flashcards</button>
+        <div style="display:flex;gap:8px;border-bottom:1px solid var(--outline);padding-bottom:8px;">
+            <button class="chip chip-active" id="tab-quiz" onclick="showStudyTab('quiz')">Quiz</button>
+            <button class="chip chip-default" id="tab-flash" onclick="showStudyTab('flash')">Flashcards</button>
         </div>
-
-        <!-- Quiz Tab -->
         <div id="study-quiz">
             <div class="grid-3" style="margin-bottom:var(--sp-md);">
-                <div><label class="form-label">FORMAT</label><select class="form-select" id="quiz-type"><option value="mcq">Multiple Choice</option><option value="true_false">True/False</option><option value="short_answer">Short Answer</option></select></div>
-                <div><label class="form-label">DIFFICULTY</label><select class="form-select" id="quiz-diff"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>
-                <div><label class="form-label">QUESTIONS</label><input type="number" class="form-input" id="quiz-num" value="5" min="3" max="10" /></div>
+                <div><label class="form-label" for="quiz-type">FORMAT</label><select class="form-select" id="quiz-type"><option value="mcq">Multiple choice</option><option value="true_false">True / False</option><option value="short_answer">Short answer</option></select></div>
+                <div><label class="form-label" for="quiz-diff">DIFFICULTY</label><select class="form-select" id="quiz-diff"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>
+                <div><label class="form-label" for="quiz-num">QUESTIONS</label><input type="number" class="form-input" id="quiz-num" value="5" min="1" max="15" /></div>
             </div>
             <button class="btn-primary" onclick="generateQuiz()"><span class="material-symbols-outlined" style="font-size:18px;">quiz</span> Generate Quiz</button>
             <div id="quiz-result" style="margin-top:var(--sp-lg);"></div>
         </div>
-
-        <!-- Flashcards Tab -->
         <div id="study-flash" class="hidden">
-            <div style="display:flex;align-items:center;gap:16px;margin-bottom:var(--sp-md);">
-                <label class="form-label" style="margin-bottom:0;">NUMBER OF CARDS</label>
-                <input type="number" class="form-input" id="flash-num" value="5" min="3" max="15" style="width:80px;" />
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:var(--sp-md);flex-wrap:wrap;">
+                <label class="form-label" for="flash-num" style="margin-bottom:0;">NUMBER OF CARDS</label>
+                <input type="number" class="form-input" id="flash-num" value="8" min="1" max="20" style="width:80px;" />
                 <button class="btn-primary" onclick="generateFlashcards()"><span class="material-symbols-outlined" style="font-size:18px;">style</span> Generate</button>
             </div>
             <div id="flash-result"></div>
         </div>
     </div>`;
+    if (state.quizItems) renderQuiz(document.getElementById('quiz-result'));
+    if (state.flashcards) renderFlashcard(document.getElementById('flash-result'));
 }
 
 function showStudyTab(tab) {
@@ -803,293 +665,225 @@ function showStudyTab(tab) {
 }
 
 async function generateQuiz() {
-    if (!state.selectedPapers.length) return showToast('Select papers first.', 'info');
+    if (!state.selectedPapers.length) return showToast('Select at least one paper.', 'info');
     const resultEl = document.getElementById('quiz-result');
-    resultEl.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
-
-    const res = await api.post('/quiz', {
-        paper_ids: state.selectedPapers,
-        quiz_type: document.getElementById('quiz-type').value,
-        difficulty: document.getElementById('quiz-diff').value,
-        num_questions: parseInt(document.getElementById('quiz-num').value)
-    });
-
-    if (res?.questions) {
+    resultEl.innerHTML = spinner();
+    try {
+        const res = await api.post('/quiz', {
+            paper_ids: state.selectedPapers,
+            quiz_type: document.getElementById('quiz-type').value,
+            difficulty: document.getElementById('quiz-diff').value,
+            num_questions: parseInt(document.getElementById('quiz-num').value, 10) || 5,
+        });
         state.quizItems = res.questions;
         state.userAnswers = {};
         state.quizSubmitted = false;
         renderQuiz(resultEl);
-    } else {
-        resultEl.innerHTML = '<p class="body-sm text-error">Failed to generate quiz.</p>';
-    }
+    } catch (e) { resultEl.innerHTML = errorBox(e.message); }
 }
 
+function chooseAnswer(qi, oi) {
+    if (state.quizSubmitted) return;
+    state.userAnswers[qi] = state.quizItems[qi].options[oi];
+    renderQuiz(document.getElementById('quiz-result'));
+}
+
+const norm = (s) => (s || '').trim().toLowerCase();
+
 function renderQuiz(el) {
-    if (!state.quizItems) return;
+    if (!state.quizItems || !el) return;
+    const done = state.quizSubmitted;
     el.innerHTML = state.quizItems.map((q, i) => `
         <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);margin-bottom:16px;">
             <p class="label-md mb-sm" style="color:var(--primary);">QUESTION ${i + 1}</p>
             <p class="body-md mb-md" style="color:var(--on-surface);">${escapeHtml(q.question)}</p>
-            ${q.options ? q.options.map((opt, oi) => `
-                <label style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:var(--radius-lg);cursor:pointer;transition:background 0.15s;margin-bottom:4px;${state.quizSubmitted ? (opt.toLowerCase().trim() === q.answer.toLowerCase().trim() ? 'background:rgba(74,225,118,0.1);' : (state.userAnswers[i] === opt ? 'background:rgba(255,180,171,0.1);' : '')) : ''}"
-                    ${state.quizSubmitted ? '' : `onclick="state.userAnswers[${i}]='${opt.replace(/'/g, "\\'")}';renderQuiz(document.getElementById('quiz-result'));"`}>
-                    <span style="width:20px;height:20px;border-radius:var(--radius-full);border:2px solid ${state.userAnswers[i] === opt ? 'var(--primary)' : 'var(--outline-variant)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        ${state.userAnswers[i] === opt ? '<span style="width:10px;height:10px;border-radius:var(--radius-full);background:var(--primary);"></span>' : ''}
-                    </span>
-                    <span class="body-sm">${escapeHtml(opt)}</span>
-                </label>
-            `).join('') : `<input class="form-input" placeholder="Your answer..." value="${escapeHtml(state.userAnswers[i] || '')}" oninput="state.userAnswers[${i}]=this.value" ${state.quizSubmitted ? 'disabled' : ''} />`}
-            ${state.quizSubmitted && q.explanation ? `<p class="body-sm" style="margin-top:12px;padding:12px;background:rgba(49,49,192,0.1);border-radius:var(--radius-lg);color:var(--secondary);"><strong>Explanation:</strong> ${escapeHtml(q.explanation)}</p>` : ''}
-        </div>
-    `).join('') + `
-    <div style="display:flex;gap:12px;">
-        ${!state.quizSubmitted ? `<button class="btn-primary" onclick="submitQuiz()">Submit Answers</button>` : ''}
-        ${state.quizSubmitted ? `<div class="academic-glass" style="padding:16px 24px;border-radius:var(--radius-xl);"><span class="headline-md text-primary">${calculateScore()} / ${state.quizItems.length}</span><span class="label-md text-muted" style="margin-left:12px;">SCORE</span></div>` : ''}
+            ${q.options ? q.options.map((opt, oi) => {
+                const picked = state.userAnswers[i] === opt;
+                const cls = done ? (norm(opt) === norm(q.answer) ? 'correct' : (picked ? 'wrong' : '')) : '';
+                return `
+                <button type="button" class="quiz-option ${cls} ${picked ? 'picked' : ''}" onclick="chooseAnswer(${i}, ${oi})" ${done ? 'disabled' : ''}>
+                    <span class="quiz-radio"></span><span class="body-sm">${escapeHtml(opt)}</span>
+                </button>`;
+            }).join('') : `
+                <input class="form-input" placeholder="Your answer..." value="${escapeHtml(state.userAnswers[i] || '')}" oninput="state.userAnswers[${i}]=this.value" ${done ? 'disabled' : ''} />
+                ${done ? `<p class="body-sm" style="margin-top:8px;"><strong>Answer:</strong> ${escapeHtml(q.answer)}</p>` : ''}`}
+            ${done && q.explanation ? `<p class="body-sm quiz-explanation"><strong>Explanation:</strong> ${escapeHtml(q.explanation)}</p>` : ''}
+        </div>`).join('') + `
+    <div style="display:flex;gap:12px;align-items:center;">
+        ${done ? `<div class="academic-glass" style="padding:16px 24px;border-radius:var(--radius-xl);"><span class="headline-md text-primary">${quizScore()} / ${state.quizItems.length}</span><span class="label-md text-muted" style="margin-left:12px;">SCORE</span></div>
+                  <button class="btn-secondary" onclick="state.quizSubmitted=false;state.userAnswers={};renderQuiz(document.getElementById('quiz-result'));">Retry</button>`
+               : `<button class="btn-primary" onclick="state.quizSubmitted=true;renderQuiz(document.getElementById('quiz-result'));">Submit Answers</button>`}
     </div>`;
 }
 
-function submitQuiz() { state.quizSubmitted = true; renderQuiz(document.getElementById('quiz-result')); }
-function calculateScore() {
-    if (!state.quizItems) return 0;
-    return state.quizItems.reduce((s, q, i) => {
-        const u = (state.userAnswers[i] || '').trim().toLowerCase();
-        return s + (u === q.answer.trim().toLowerCase() ? 1 : 0);
-    }, 0);
+function quizScore() {
+    return state.quizItems.reduce((s, q, i) => s + (norm(state.userAnswers[i]) === norm(q.answer) ? 1 : 0), 0);
 }
 
 async function generateFlashcards() {
-    if (!state.selectedPapers.length) return showToast('Select papers first.', 'info');
+    if (!state.selectedPapers.length) return showToast('Select at least one paper.', 'info');
     const resultEl = document.getElementById('flash-result');
-    resultEl.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
-
-    const res = await api.post('/flashcards', {
-        paper_ids: state.selectedPapers,
-        num_cards: parseInt(document.getElementById('flash-num').value)
-    });
-
-    if (res?.cards) {
+    resultEl.innerHTML = spinner();
+    try {
+        const res = await api.post('/flashcards', {
+            paper_ids: state.selectedPapers,
+            num_cards: parseInt(document.getElementById('flash-num').value, 10) || 8,
+        });
         state.flashcards = res.cards;
         state.cardIndex = 0;
         state.cardFlipped = false;
         renderFlashcard(resultEl);
-    } else {
-        resultEl.innerHTML = '<p class="body-sm text-error">Failed to generate flashcards.</p>';
-    }
+    } catch (e) { resultEl.innerHTML = errorBox(e.message); }
 }
 
 function renderFlashcard(el) {
-    if (!state.flashcards) return;
+    if (!state.flashcards || !el) return;
     const card = state.flashcards[state.cardIndex];
     const total = state.flashcards.length;
     const idx = state.cardIndex;
-
     el.innerHTML = `
-    <div style="display:flex;justify-content:center;gap:16px;margin-bottom:var(--sp-md);">
-        <button class="btn-secondary" onclick="flipCard(-1)" ${idx === 0 ? 'disabled style="opacity:0.3;"' : ''}>◀ Previous</button>
-        <button class="btn-primary" onclick="flipCardToggle()" style="min-width:120px;">🔄 Flip Card</button>
-        <button class="btn-secondary" onclick="flipCard(1)" ${idx === total - 1 ? 'disabled style="opacity:0.3;"' : ''}>Next ▶</button>
+    <div style="display:flex;justify-content:center;gap:12px;margin-bottom:var(--sp-md);flex-wrap:wrap;">
+        <button class="btn-secondary" onclick="moveCard(-1)" ${idx === 0 ? 'disabled' : ''}>Previous</button>
+        <button class="btn-primary" onclick="state.cardFlipped=!state.cardFlipped;renderFlashcard(document.getElementById('flash-result'));">Flip</button>
+        <button class="btn-secondary" onclick="moveCard(1)" ${idx === total - 1 ? 'disabled' : ''}>Next</button>
     </div>
-    <div class="flashcard ${state.cardFlipped ? 'flipped' : ''}">
-        <div class="flashcard-label">${state.cardFlipped ? `Answer (Card ${idx + 1}/${total})` : `Concept (Card ${idx + 1}/${total})`}</div>
+    <div class="flashcard ${state.cardFlipped ? 'flipped' : ''}" onclick="state.cardFlipped=!state.cardFlipped;renderFlashcard(document.getElementById('flash-result'));" style="cursor:pointer;">
+        <div class="flashcard-label">${state.cardFlipped ? 'Answer' : 'Concept'} · ${idx + 1}/${total}</div>
         <div class="flashcard-text">${escapeHtml(state.cardFlipped ? card.back : card.front)}</div>
         ${state.cardFlipped && card.explanation ? `<div class="flashcard-explanation">${escapeHtml(card.explanation)}</div>` : ''}
     </div>`;
 }
 
-function flipCard(dir) {
+function moveCard(dir) {
     state.cardIndex = Math.max(0, Math.min(state.flashcards.length - 1, state.cardIndex + dir));
     state.cardFlipped = false;
     renderFlashcard(document.getElementById('flash-result'));
 }
 
-function flipCardToggle() {
-    state.cardFlipped = !state.cardFlipped;
-    renderFlashcard(document.getElementById('flash-result'));
-}
-
 // ============================================================
-// PAGE: Research Gaps
+// PAGE: Research gaps
 // ============================================================
 async function renderResearchGaps(el) {
-    const papers = await api.get('/papers/') || [];
-    const completedPapers = papers.filter(p => p.status === 'completed');
-
+    const papers = await readyPapers();
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
         <div>
             <h2 class="headline-lg mb-xs">Research Gap Detector</h2>
-            <p class="body-md text-muted">Analyze papers to find contradictions, missing experiments, and unexplored areas.</p>
+            <p class="body-md text-muted">Retrieves limitation and future-work passages from each paper and looks for gaps and contradictions.</p>
         </div>
         <div>
-            <label class="form-label">SELECT PAPERS TO ANALYZE</label>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                ${completedPapers.map(p => `
-                    <label class="chip ${state.selectedPapers.includes(p.id) ? 'chip-active' : 'chip-default'}" style="cursor:pointer;">
-                        <input type="checkbox" value="${p.id}" ${state.selectedPapers.includes(p.id) ? 'checked' : ''} style="display:none;" onchange="togglePaperSelection(this)" />
-                        ${escapeHtml(p.title.substring(0, 35))}${p.title.length > 35 ? '...' : ''}
-                    </label>
-                `).join('') || '<p class="body-sm text-muted">No papers available.</p>'}
-            </div>
+            <label class="form-label">SELECT PAPERS</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${paperChips(papers)}</div>
         </div>
-        <button class="btn-primary" style="align-self:flex-start;" onclick="runGapDetection()">
-            <span class="material-symbols-outlined" style="font-size:18px;">troubleshoot</span> Run Gap Detection
-        </button>
+        <button class="btn-primary" style="align-self:flex-start;" onclick="runGapDetection()"><span class="material-symbols-outlined" style="font-size:18px;">troubleshoot</span> Find Research Gaps</button>
         <div id="gaps-result">${state.researchGaps ? renderGaps(state.researchGaps) : ''}</div>
     </div>`;
 }
 
 async function runGapDetection() {
-    if (!state.selectedPapers.length) return showToast('Select papers first.', 'info');
+    if (!state.selectedPapers.length) return showToast('Select at least one paper.', 'info');
     const resultEl = document.getElementById('gaps-result');
-    resultEl.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
-
-    const res = await api.post('/gap-detector', state.selectedPapers);
-    if (res?.gaps) {
+    resultEl.innerHTML = spinner();
+    try {
+        const res = await api.post('/gap-detector', state.selectedPapers);
         state.researchGaps = res.gaps;
         resultEl.innerHTML = renderGaps(res.gaps);
-    } else {
-        resultEl.innerHTML = '<p class="body-sm text-error">Failed to analyze gaps.</p>';
-    }
+    } catch (e) { resultEl.innerHTML = errorBox(e.message); }
 }
 
 function renderGaps(gaps) {
-    if (!gaps.length) return '<p class="body-sm text-muted" style="padding:24px;">No research gaps detected.</p>';
-    return gaps.map((g, i) => `
+    if (!gaps.length) return '<p class="body-sm text-muted" style="padding:24px 0;">No research gaps found in the retrieved passages.</p>';
+    const categories = { limitation: 'Limitation', missing_experiment: 'Missing experiment', contradiction: 'Contradiction', future_work: 'Future work' };
+    return gaps.map(g => `
     <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);margin-bottom:16px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <span class="label-md text-primary">GAP OPPORTUNITY #${i + 1}</span>
-            <span class="status-badge ${(g.confidence || 'medium') === 'high' ? 'completed' : 'pending'}">
-                <span class="dot"></span>${(g.confidence || 'medium').toUpperCase()}
-            </span>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+            <h3 class="headline-md" style="flex:1;min-width:200px;">${escapeHtml(g.title)}</h3>
+            <div style="display:flex;gap:8px;">
+                <span class="chip chip-default">${escapeHtml(categories[g.category] || g.category)}</span>
+                <span class="status-badge ${g.confidence === 'high' ? 'completed' : 'pending'}"><span class="dot"></span>${escapeHtml(g.confidence)}</span>
+            </div>
         </div>
-        <p class="body-sm text-muted mb-sm">Section: ${escapeHtml(g.section || 'General')}</p>
-        <p class="body-md" style="color:var(--on-surface);line-height:1.7;">${escapeHtml(g.gap_description || 'No description provided.')}</p>
+        <p class="body-md" style="color:var(--on-surface);line-height:1.7;">${escapeHtml(g.description)}</p>
+        ${g.suggestion ? `<p class="body-sm quiz-explanation"><strong>Suggestion:</strong> ${escapeHtml(g.suggestion)}</p>` : ''}
+        ${g.papers?.length ? `<p class="label-sm text-muted" style="margin-top:12px;">Papers: ${g.papers.map(escapeHtml).join('; ')}</p>` : ''}
     </div>`).join('');
 }
-
 
 // ============================================================
 // PAGE: Comparison
 // ============================================================
 async function renderComparison(el) {
-    const papers = await api.get('/papers/') || [];
-    const completedPapers = papers.filter(p => p.status === 'completed');
-
+    const papers = await readyPapers();
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
         <div>
             <h2 class="headline-lg mb-xs">Paper Comparison</h2>
-            <p class="body-md text-muted">Automatically generate a structured comparison of methodologies, datasets, and results.</p>
+            <p class="body-md text-muted">A side-by-side comparison of problem, approach, datasets, results and limitations.</p>
         </div>
-        
         <div>
-            <label class="form-label">SELECT PAPERS TO COMPARE</label>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                ${completedPapers.map(p => `
-                    <label class="chip ${state.selectedPapers.includes(p.id) ? 'chip-active' : 'chip-default'}" style="cursor:pointer;">
-                        <input type="checkbox" value="${p.id}" ${state.selectedPapers.includes(p.id) ? 'checked' : ''} style="display:none;" onchange="togglePaperSelection(this)" />
-                        ${escapeHtml(p.title.substring(0, 35))}${p.title.length > 35 ? '...' : ''}
-                    </label>
-                `).join('') || '<p class="body-sm text-muted">No papers available.</p>'}
-            </div>
+            <label class="form-label">SELECT TWO OR MORE PAPERS</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${paperChips(papers)}</div>
         </div>
-        
-        <button class="btn-primary" style="align-self:flex-start;" onclick="runComparison()">
-            <span class="material-symbols-outlined" style="font-size:18px;">compare_arrows</span> Compare Selected Papers
-        </button>
-        
+        <button class="btn-primary" style="align-self:flex-start;" onclick="runComparison()"><span class="material-symbols-outlined" style="font-size:18px;">compare_arrows</span> Compare Papers</button>
         <div id="comparison-result"></div>
     </div>`;
 }
 
 async function runComparison() {
-    if (state.selectedPapers.length < 2) return showToast('Please select at least TWO papers to compare.', 'info');
-    
+    if (state.selectedPapers.length < 2) return showToast('Select at least two papers.', 'info');
     const resultEl = document.getElementById('comparison-result');
-    resultEl.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
-
-    const res = await api.post('/compare', state.selectedPapers);
-    if (res && res.comparison_markdown) {
+    resultEl.innerHTML = spinner();
+    try {
+        const res = await api.post('/compare', state.selectedPapers);
+        state.exports.comparison = res.comparison_markdown;
         resultEl.innerHTML = `
         <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-md);">
-                <h3 class="headline-md">Comparison Result</h3>
+                <h3 class="headline-md">Comparison</h3>
+                <span class="label-sm text-muted">${res.latency_sec.toFixed(1)}s</span>
             </div>
-            <div class="body-md" style="line-height:1.8;white-space:pre-wrap;color:rgba(218,226,253,0.9);">${escapeHtml(res.comparison_markdown)}</div>
-            <div style="display:flex;gap:12px;margin-top:var(--sp-md);padding-top:var(--sp-md);border-top:1px solid rgba(70,69,85,0.1);">
-                <button class="btn-secondary" onclick="downloadAs('comparison.md', \`${res.comparison_markdown.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">
-                    <span class="material-symbols-outlined" style="font-size:16px;">download</span> Export MD
-                </button>
+            <div class="markdown body-md">${md(res.comparison_markdown)}</div>
+            <div class="result-actions">
+                <button class="btn-secondary" onclick="exportMarkdown('comparison', 'comparison.md')"><span class="material-symbols-outlined" style="font-size:16px;">download</span> Export MD</button>
             </div>
         </div>`;
-    } else {
-        resultEl.innerHTML = '<p class="body-sm text-error">Failed to generate comparison.</p>';
-    }
+    } catch (e) { resultEl.innerHTML = errorBox(e.message); }
 }
 
 // ============================================================
-// INIT
+// PAGE: Settings
 // ============================================================
 async function renderSettings(el) {
-    const status = await api.get('/status');
-
+    const status = await attempt(api.get('/status'));
+    if (!status) { el.innerHTML = errorBox('Backend unreachable.'); return; }
+    const config = [
+        ['LLM', `${status.llm_provider} / ${status.llm_model}`],
+        ['Embedding model', `${status.embedding_model} (${status.embedding_dim}-dim)`],
+        ['Qdrant collection', `${status.collection} - ${status.vectors_stored} vectors`],
+        ['Similarity metric', 'Cosine'],
+        ['Chunking', `Recursive, ${status.chunk_size} tokens, ${status.chunk_overlap} overlap`],
+        ['Retrieval', `Semantic search, top-${status.top_k}`],
+        ['Tracing', status.tracing_enabled ? 'Langfuse enabled' : 'Langfuse disabled'],
+        ['Papers', status.total_papers],
+    ];
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
         <div>
-            <h2 class="headline-lg mb-xs">System Settings</h2>
-            <p class="body-md text-muted">Configure RAG parameters, model selection, and system preferences.</p>
+            <h2 class="headline-lg mb-xs">Settings</h2>
+            <p class="body-md text-muted">Everything is configured in <code>.env</code>; restart the server after changes.</p>
         </div>
-
-        <!-- System Status -->
         <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
-            <h3 class="headline-md mb-md">System Status</h3>
-            ${status ? `
-            <div class="grid-4">
-                <div>
-                    <div class="label-md text-muted mb-xs">GPU</div>
-                    <div class="body-sm">${status.gpu_available ? `<span style="color:var(--tertiary);">● Active</span>` : `<span style="color:var(--outline);">● CPU</span>`}</div>
-                    ${status.gpu_device_name ? `<div class="label-sm text-muted">${escapeHtml(status.gpu_device_name)}</div>` : ''}
-                </div>
-                <div>
-                    <div class="label-md text-muted mb-xs">Gemini API</div>
-                    <div class="body-sm">${status.provider_status === 'Connected' ? `<span style="color:var(--tertiary);">● Connected</span>` : `<span style="color:var(--error);">● Not Configured</span>`}</div>
-                </div>
-                <div>
-                    <div class="label-md text-muted mb-xs">MODEL</div>
-                    <div class="body-sm">${status.current_model || 'None'}</div>
-                </div>
-                <div>
-                    <div class="label-md text-muted mb-xs">DATABASE</div>
-                    <div class="body-sm">${(status.db_size_bytes / (1024*1024)).toFixed(2)} MB</div>
-                </div>
-            </div>` : '<p class="body-sm text-error">Backend disconnected.</p>'}
+            <h3 class="headline-md mb-md">Services</h3>
+            <div class="service-grid">${serviceRows(status.services)}</div>
         </div>
-
-        <!-- Configuration Note -->
         <div class="academic-glass" style="padding:var(--sp-md);border-radius:var(--radius-xl);">
-            <h3 class="headline-md mb-md">Configuration</h3>
-            <p class="body-sm text-muted" style="line-height:1.7;">
-                RAG parameters (chunk size, overlap, hybrid alpha, rerank top-N), embedding models, and LLM model selection
-                are configured via the <code style="background:var(--surface-container-highest);padding:2px 6px;border-radius:4px;">config/settings.py</code> file
-                or environment variables in <code style="background:var(--surface-container-highest);padding:2px 6px;border-radius:4px;">.env</code>.
-            </p>
-            <div class="grid-2" style="margin-top:var(--sp-md);">
-                <div style="padding:16px;background:var(--surface-container-low);border-radius:var(--radius-lg);border:1px solid rgba(70,69,85,0.1);">
-                    <div class="label-md text-muted mb-xs">CHUNK SIZE</div>
-                    <div class="body-md">700 tokens</div>
-                </div>
-                <div style="padding:16px;background:var(--surface-container-low);border-radius:var(--radius-lg);border:1px solid rgba(70,69,85,0.1);">
-                    <div class="label-md text-muted mb-xs">CHUNK OVERLAP</div>
-                    <div class="body-md">100 tokens</div>
-                </div>
-                <div style="padding:16px;background:var(--surface-container-low);border-radius:var(--radius-lg);border:1px solid rgba(70,69,85,0.1);">
-                    <div class="label-md text-muted mb-xs">EMBEDDING MODEL</div>
-                    <div class="body-sm">BAAI/bge-small-en-v1.5</div>
-                </div>
-                <div style="padding:16px;background:var(--surface-container-low);border-radius:var(--radius-lg);border:1px solid rgba(70,69,85,0.1);">
-                    <div class="label-md text-muted mb-xs">HYBRID ALPHA</div>
-                    <div class="body-md">0.5</div>
-                </div>
+            <h3 class="headline-md mb-md">RAG configuration</h3>
+            <div class="grid-2">
+                ${config.map(([k, v]) => `
+                <div class="config-tile">
+                    <div class="label-md text-muted mb-xs">${escapeHtml(k)}</div>
+                    <div class="body-sm" style="color:var(--on-surface);overflow-wrap:anywhere;">${escapeHtml(v)}</div>
+                </div>`).join('')}
             </div>
         </div>
     </div>`;
@@ -1098,16 +892,13 @@ async function renderSettings(el) {
 // ============================================================
 // INIT
 // ============================================================
-document.addEventListener('DOMContentLoaded', () => {
-    const hash = window.location.hash.replace('#', '') || 'dashboard';
-    state.currentPage = hash;
+function syncFromHash() {
+    state.currentPage = window.location.hash.replace('#', '') || 'dashboard';
     renderPage();
-    updateActiveNav();
+}
 
-    window.addEventListener('hashchange', () => {
-        const h = window.location.hash.replace('#', '') || 'dashboard';
-        state.currentPage = h;
-        renderPage();
-        updateActiveNav();
-    });
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.marked) marked.setOptions({ gfm: true, breaks: true });
+    window.addEventListener('hashchange', syncFromHash);
+    syncFromHash();
 });
