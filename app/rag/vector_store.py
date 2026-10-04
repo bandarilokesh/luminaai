@@ -148,6 +148,22 @@ class VectorStore:
 def get_vector_store() -> VectorStore:
     if settings.QDRANT_URL == ":memory:":
         client = QdrantClient(":memory:")
+    elif settings.QDRANT_URL in ("local", ":local:", "embedded") or (
+        not settings.QDRANT_URL.startswith("http://") and not settings.QDRANT_URL.startswith("https://")
+    ):
+        qdrant_dir = settings.DATA_DIR / "qdrant" if settings.QDRANT_URL in ("local", ":local:", "embedded") else settings.QDRANT_URL
+        client = QdrantClient(path=str(qdrant_dir))
     else:
-        client = QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None, timeout=30)
+        try:
+            client = QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None, timeout=3)
+            # Fast health check to ensure connection is actually alive
+            client.get_collections()
+        except Exception as e:
+            logger.warning(
+                f"Qdrant server at {settings.QDRANT_URL} is unreachable ({e}). "
+                f"Using local embedded vector database at 'data/qdrant'."
+            )
+            qdrant_dir = settings.DATA_DIR / "qdrant"
+            qdrant_dir.mkdir(parents=True, exist_ok=True)
+            client = QdrantClient(path=str(qdrant_dir))
     return VectorStore(client)
