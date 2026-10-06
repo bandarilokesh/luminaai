@@ -8,7 +8,8 @@ from app.db import db
 from app.logger import logger
 from app.rag.pipeline import index_paper
 from app.rag.vector_store import get_vector_store
-from app.schemas import Message, Paper
+from app.schemas import Message, Paper, UploadUrlRequest
+import httpx
 
 router = APIRouter(prefix="/papers", tags=["Papers"])
 
@@ -56,6 +57,38 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
         raise
 
     paper = db.add_paper(paper_id, file.filename, file_path, size)
+    background_tasks.add_task(run_indexing, paper_id, file_path)
+    return paper
+
+
+@router.post("/upload-url", response_model=Paper, status_code=status.HTTP_201_CREATED)
+async def upload_url(request: UploadUrlRequest, background_tasks: BackgroundTasks):
+    paper_id = str(uuid.uuid4())
+    file_path = settings.UPLOAD_DIR / f"{paper_id}.pdf"
+    limit = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    size = 0
+    
+    filename = request.filename or request.url.split("/")[-1].split("?")[0]
+    if not filename.lower().endswith(".pdf"):
+        filename += ".pdf"
+        
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            async with client.stream("GET", request.url) as response:
+                response.raise_for_status()
+                with open(file_path, "wb") as out:
+                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                        size += len(chunk)
+                        if size > limit:
+                            raise HTTPException(
+                                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"File exceeds {settings.MAX_UPLOAD_SIZE_MB}MB."
+                            )
+                        out.write(chunk)
+    except Exception as e:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Failed to download PDF: {str(e)}")
+
+    paper = db.add_paper(paper_id, filename, file_path, size)
     background_tasks.add_task(run_indexing, paper_id, file_path)
     return paper
 

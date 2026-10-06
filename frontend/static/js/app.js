@@ -361,6 +361,13 @@ function renderUpload(el) {
                 <p class="body-sm text-muted mb-md">or click to browse</p>
                 <div class="file-type-badges"><div class="file-type-badge"><span class="material-symbols-outlined" style="font-size:16px;color:var(--primary);">picture_as_pdf</span> PDF, up to 50 MB</div></div>
             </div>
+            
+            <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 8px;">
+                <label class="form-label">IMPORT FROM URLs (Max 25)</label>
+                <textarea id="upload-url-input" placeholder="Paste links to PDFs (one per line, or comma separated)..." style="width: 100%; min-height: 80px; padding: 12px; border-radius: 8px; border: 1px solid var(--outline); background: var(--surface); color: var(--on-surface); font-size: 14px; resize: vertical;"></textarea>
+                <button class="btn-primary" id="upload-url-btn" style="align-self: flex-start;"><span class="material-symbols-outlined" style="font-size:18px;">link</span> Import URLs</button>
+            </div>
+
             <div id="upload-list" style="display:flex;flex-direction:column;gap:12px;margin-top:24px;"></div>
         </div>
     </div>`;
@@ -370,6 +377,19 @@ function renderUpload(el) {
     ['dragleave', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag-over'); }));
     dropzone.addEventListener('drop', e => [...e.dataTransfer.files].forEach(handleUpload));
     document.getElementById('upload-file-input').addEventListener('change', e => { [...e.target.files].forEach(handleUpload); e.target.value = ''; });
+
+    document.getElementById('upload-url-btn').addEventListener('click', () => {
+        const urlInput = document.getElementById('upload-url-input');
+        const urls = urlInput.value.split(/[\n,]+/).map(u => u.trim()).filter(u => u);
+        if (urls.length > 0) {
+            if (urls.length > 25) {
+                showToast('Maximum 25 URLs allowed at once.', 'error');
+                return;
+            }
+            urls.forEach(url => handleUrlUpload(url));
+            urlInput.value = '';
+        }
+    });
 }
 
 function uploadRow(rowId, name, status, detail) {
@@ -399,6 +419,29 @@ async function handleUpload(file) {
     if (!file.name.toLowerCase().endsWith('.pdf')) return setRow('failed', 'Only PDF files are supported.');
     let paper;
     try { paper = await api.upload('/papers/upload', file); }
+    catch (e) { return setRow('failed', e.message); }
+
+    // Poll until the background indexing pipeline finishes.
+    for (;;) {
+        setRow(paper.status, paper.status === 'completed' ? `${paper.page_count} pages, ${paper.chunk_count} chunks indexed` : paper.error_message);
+        if (paper.status === 'completed' || paper.status === 'failed') break;
+        await new Promise(r => setTimeout(r, 1500));
+        try { paper = await api.get(`/papers/${paper.id}`); } catch { break; }
+    }
+    if (paper.status === 'completed') showToast(`"${paper.title.substring(0, 40)}" is ready.`, 'success');
+}
+
+async function handleUrlUpload(url) {
+    const list = document.getElementById('upload-list');
+    const rowId = `up-${Math.random().toString(36).slice(2)}`;
+    list.insertAdjacentHTML('afterbegin', uploadRow(rowId, url, 'uploading'));
+    const setRow = (status, detail) => {
+        const row = document.getElementById(rowId);
+        if (row) row.outerHTML = uploadRow(rowId, url, status, detail);
+    };
+
+    let paper;
+    try { paper = await api.post('/papers/upload-url', { url: url }); }
     catch (e) { return setRow('failed', e.message); }
 
     // Poll until the background indexing pipeline finishes.

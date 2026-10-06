@@ -15,6 +15,11 @@ class Paper(BaseModel):
     uploaded_at: str
 
 
+class UploadUrlRequest(BaseModel):
+    url: str
+    filename: str | None = None
+
+
 class Message(BaseModel):
     message: str
     success: bool = True

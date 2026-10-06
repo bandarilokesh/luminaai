@@ -249,7 +249,7 @@ If you cannot install Docker on your machine, you can use **Qdrant Cloud's perma
 |---|---|
 | **Dashboard** | Overview of your papers, question history, total study sessions, and live service health indicators. |
 | **Library** | View all uploaded papers, metadata (authors, abstract, page counts, chunk count), or delete/re-index documents. |
-| **Upload** | Drag-and-drop PDF papers into the indexing engine (up to 50MB per paper). |
+| **Upload** | Drag-and-drop PDF papers, or batch import up to 25 PDF links at once directly from URLs. |
 | **QA (Chat)** | Ask questions with streaming responses, page-level citation pills, and source excerpts. Filter by specific papers or search your entire library. |
 | **Summary** | Generate targeted summaries in 8 distinct formats (Abstract, ELI5 Beginner, Technical, Bullet points, etc.) with markdown export. |
 | **Study Tools** | Generate custom **Quizzes** (MCQ, True/False, Short Answer) or interactive **Flashcards** for exam preparation. |
@@ -289,6 +289,7 @@ Lumina AI includes an interactive Swagger / OpenAPI interface. With the server r
 
 ### Key Endpoints:
 - `POST /api/papers/upload` — Upload and index a new PDF paper.
+- `POST /api/papers/upload-url` — Import and index a paper directly from a URL.
 - `GET /api/papers/` — List all papers and their indexing statuses.
 - `DELETE /api/papers/{id}` — Delete a paper and remove its vectors from Qdrant.
 - `POST /api/qa` — Submit a question and receive a cited response.
