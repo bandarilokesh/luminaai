@@ -42,32 +42,30 @@ Reading complex academic papers is time-consuming. Generic AI chatbots often hal
 
 Lumina AI processes documents in two straightforward pipelines:
 
-```
-📄 1. WHEN YOU UPLOAD A PAPER (Indexing Pipeline)
-   [Your PDF] 
-       │
-       ▼ PyMuPDF (Extracts text, strips messy headers/footers, extracts title & abstract)
-   [Clean Text] 
-       │
-       ▼ Recursive Chunker (Splits text into 400-token chunks with 15% overlap)
-   [Document Chunks] 
-       │
-       ▼ Jina AI Embeddings (Converts text chunks into mathematical vectors)
-   [Qdrant Vector DB] (Stored with paper ID, page number, and section metadata)
-```
+```mermaid
+graph TD
+    classDef highlight fill:#4F46E5,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef process fill:#1E293B,stroke:#94A3B8,stroke-width:1px,color:#E2E8F0;
+    classDef database fill:#059669,stroke:#fff,stroke-width:2px,color:#fff;
 
-```
-🔍 2. WHEN YOU ASK A QUESTION (Query Pipeline)
-   [Your Question] 
-       │
-       ▼ Jina AI Embeddings (Converts your question into a search vector)
-   [Vector Search in Qdrant] (Finds top-5 most relevant chunks from the paper)
-       │
-       ▼ Context Injection (Numbers each excerpt with paper name, page, and section)
-   [LLM: Groq / Gemini] (Instructed to answer strictly using the provided excerpts)
-       │
-       ▼
-   [Cited Answer with [1], [2] References]
+    %% 1. Indexing Pipeline
+    subgraph Indexing ["📄 1. Indexing Pipeline (Uploads & URLs)"]
+        direction TB
+        A[PDF / Web URL]:::highlight -->|PyMuPDF| B(Extract Text & Clean Headers):::process
+        B -->|Recursive Chunker| C(400-token Text Chunks):::process
+        C -->|Jina AI| D(Generate Embeddings):::process
+        D -->|Store Vectors| E[(Qdrant Vector DB)]:::database
+    end
+
+    %% 2. Query Pipeline
+    subgraph Querying ["🔍 2. Query Pipeline (QA, Summaries, Gaps)"]
+        direction TB
+        Q[User Question]:::highlight -->|Jina AI| V(Search Vector):::process
+        V -->|Cosine Similarity Search| E
+        E -->|Top-5 Relevant Chunks| R(Context Injection):::process
+        R -->|Strict System Prompts| L(Groq / Gemini LLM):::process
+        L --> O[Grounded Output with Citations]:::database
+    end
 ```
 
 ---
