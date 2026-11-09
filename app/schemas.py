@@ -33,6 +33,8 @@ class Citation(BaseModel):
     chunk_id: str
     text_snippet: str
     score: float
+    kind: str = "text"  # "text" chunk or "table"
+    table_index: int | None = None
 
 
 class QARequest(BaseModel):
@@ -152,3 +154,69 @@ class SystemStatus(BaseModel):
     top_k: int
     tracing_enabled: bool
     services: list[ServiceStatus]
+
+
+# --- Novelty 4: dual-stream tables ---
+class TableItem(BaseModel):
+    table_index: int
+    page: int
+    caption: str
+    markdown: str
+    headers: list[str]
+    rows: list[list[str]]
+
+
+class PaperTablesResponse(BaseModel):
+    paper_id: str
+    paper_title: str
+    tables: list[TableItem]
+
+
+# --- Novelty 2: reproducibility & leakage audit ---
+class AuditItem(BaseModel):
+    parameter: str
+    status: str = Field(..., description="specified | missing | inferred | partial")
+    value: str | None = None
+    citation_page: int | None = None
+    risk_level: str = Field("low", description="low | medium | high")
+    note: str
+
+
+class AuditCategory(BaseModel):
+    key: str
+    category_name: str
+    score: float = Field(..., ge=0.0, le=100.0)
+    weight: float
+    items: list[AuditItem]
+
+
+class LinkCheck(BaseModel):
+    url: str
+    live: bool | None = None
+    status: str
+
+
+class AuditSignals(BaseModel):
+    repo_urls: list[str] = Field(default_factory=list)
+    link_checks: list[LinkCheck] = Field(default_factory=list)
+    accelerators: list[str] = Field(default_factory=list)
+    seed_mentions: int = 0
+    variance_mentions: int = 0
+
+
+class ReproducibilityReport(BaseModel):
+    paper_id: str
+    paper_title: str
+    overall_score: float = Field(..., ge=0.0, le=100.0)
+    grade: str
+    classification: str
+    categories: list[AuditCategory]
+    missing_critical_parameters: list[str]
+    potential_leakage_risks: list[str]
+    reproduction_recipe: str
+    recipe_command: str
+    estimated_hardware: str
+    signals: AuditSignals
+    created_at: str
+    cached: bool = False
+    latency_sec: float = 0.0

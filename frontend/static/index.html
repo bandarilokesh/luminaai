@@ -7,9 +7,11 @@
     <title>Lumina AI</title>
     <meta name="description" content="Lumina AI - a RAG research assistant: ask grounded questions about your papers, summarize, and study." />
     <link rel="icon" href="/static/img/lumina.ico" />
-    <link rel="stylesheet" href="/static/css/styles.css?v=6" />
+    <link rel="stylesheet" href="/static/css/styles.css?v=7" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
     <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous" defer></script>
 </head>
 
 <body>
@@ -62,6 +64,10 @@
                 <a class="nav-item" data-page="comparison" onclick="navigate('comparison')">
                     <span class="material-symbols-outlined">compare_arrows</span>
                     <span>Compare</span>
+                </a>
+                <a class="nav-item" data-page="audit" onclick="navigate('audit')">
+                    <span class="material-symbols-outlined">verified</span>
+                    <span>Repro Audit</span>
                 </a>
             </nav>
 
@@ -149,7 +155,7 @@
     </script>
 
     <!-- Main Application Script -->
-    <script src="/static/js/app.js" defer></script>
+    <script src="/static/js/app.js?v=7" defer></script>
 
 </body>
 

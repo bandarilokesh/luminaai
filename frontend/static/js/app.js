@@ -72,13 +72,43 @@ function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-/** Render model Markdown safely; [n] citation markers become badges. */
+// ---- Math (KaTeX) ----
+function renderTex(tex, display) {
+    if (window.katex) {
+        try { return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html' }); }
+        catch { /* fall through to plain text */ }
+    }
+    return `<code class="tex">${escapeHtml(display ? `$$${tex}$$` : `$${tex}$`)}</code>`;
+}
+
+/** Pull $$...$$, \[...\], \(...\) and $...$ out of text so Markdown parsing cannot mangle `_` or `\`. */
+function stashMath(text) {
+    const math = [];
+    const keep = (tex, display) => { math.push({ tex, display }); return `@@MATH${math.length - 1}@@`; };
+    const src = text
+        .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t.trim(), true))
+        .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t.trim(), true))
+        .replace(/\\\((.+?)\\\)/g, (_, t) => keep(t, false))
+        // Inline $...$: no space just inside the delimiters and no digit right after the closing one ($5 and $10 stay text).
+        .replace(/(^|[^\\$\w])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (_, pre, t) => pre + keep(t, false));
+    return { src, restore: (html) => html.replace(/@@MATH(\d+)@@/g, (_, i) => renderTex(math[i].tex, math[i].display)) };
+}
+
+/** Render model Markdown safely; math via KaTeX; [n] citation markers become badges. */
 function md(text) {
     if (!text) return '';
+    const { src, restore } = stashMath(text);
     let html = (window.marked && window.DOMPurify)
-        ? DOMPurify.sanitize(marked.parse(text))
-        : `<p style="white-space:pre-wrap;">${escapeHtml(text)}</p>`;
-    return html.replace(/\[(\d{1,2})\]/g, '<sup class="cite">$1</sup>');
+        ? DOMPurify.sanitize(marked.parse(src))
+        : `<p style="white-space:pre-wrap;">${escapeHtml(src)}</p>`;
+    html = html.replace(/\[(\d{1,2})\]/g, '<sup class="cite">$1</sup>');
+    return restore(html);
+}
+
+/** Plain text (escaped) with math rendered; for snippets that are not Markdown. */
+function mathText(text) {
+    const { src, restore } = stashMath(text || '');
+    return restore(escapeHtml(src));
 }
 
 const spinner = () => '<div style="display:flex;justify-content:center;padding:40px;"><div class="spinner"></div></div>';
@@ -134,6 +164,7 @@ const PAGES = {
     'study-tools': ['Study Tools', () => renderStudyTools],
     'research-gaps': ['Research Gaps', () => renderResearchGaps],
     comparison: ['Paper Comparison', () => renderComparison],
+    audit: ['Reproducibility Audit', () => renderAudit],
     settings: ['Settings', () => renderSettings],
 };
 
@@ -184,7 +215,7 @@ async function renderDashboard(el) {
         api.get('/status').catch(() => null),
     ]);
     const s = stats || { total_papers: 0, questions_asked: 0, summaries_generated: 0, study_sessions: 0 };
-    const icons = { upload: 'upload', indexed: 'database', qa: 'question_answer', summary: 'article', quiz: 'quiz', flashcards: 'style', compare: 'compare_arrows', gaps: 'troubleshoot' };
+    const icons = { upload: 'upload', indexed: 'database', qa: 'question_answer', summary: 'article', quiz: 'quiz', flashcards: 'style', compare: 'compare_arrows', gaps: 'troubleshoot', audit: 'verified' };
 
     el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:var(--sp-xl);">
@@ -313,7 +344,9 @@ function renderPaperCard(p) {
             ${ready ? `
             <button class="btn-open" onclick="selectPaperAndGo('${p.id}', 'qa')"><span class="material-symbols-outlined" style="font-size:16px;">chat_bubble</span> Chat</button>
             <button class="btn-icon" title="Summarize" aria-label="Summarize" onclick="selectPaperAndGo('${p.id}', 'summary')"><span class="material-symbols-outlined">summarize</span></button>
-            <button class="btn-icon" title="Study tools" aria-label="Study tools" onclick="selectPaperAndGo('${p.id}', 'study-tools')"><span class="material-symbols-outlined">quiz</span></button>`
+            <button class="btn-icon" title="Study tools" aria-label="Study tools" onclick="selectPaperAndGo('${p.id}', 'study-tools')"><span class="material-symbols-outlined">quiz</span></button>
+            <button class="btn-icon" title="Extracted tables" aria-label="Extracted tables" onclick="openTablesList('${p.id}')"><span class="material-symbols-outlined">table_chart</span></button>
+            <button class="btn-icon" title="Reproducibility audit" aria-label="Reproducibility audit" onclick="selectPaperAndGo('${p.id}', 'audit')"><span class="material-symbols-outlined">verified</span></button>`
             : p.status === 'failed' ? `
             <button class="btn-open" onclick="reindexPaper('${p.id}')"><span class="material-symbols-outlined" style="font-size:16px;">refresh</span> Retry indexing</button>`
             : '<span class="body-sm text-muted">Embedding and storing chunks...</span>'}
@@ -340,6 +373,7 @@ async function reindexPaper(id) {
 function selectPaperAndGo(id, page) {
     state.selectedPapers = [id];
     state.summaryPaper = id;
+    state.auditPaper = id;
     navigate(page);
 }
 
@@ -517,12 +551,18 @@ function renderChatMessage(msg, index) {
             <details class="citations">
                 <summary class="label-md text-muted">${citations.length} source${citations.length > 1 ? 's' : ''}</summary>
                 <div class="citation-grid">
-                    ${citations.map((c, i) => `
+                    ${citations.map((c, i) => c.kind === 'table' ? `
+                    <div class="citation-card citation-table" onclick="openTableModal('${c.paper_id}', ${c.table_index}, ${index})" title="Open the table">
+                        <span class="citation-tag">[${i + 1}] Table ${c.table_index} · ${Math.round(c.score * 100)}% match</span>
+                        <h4 class="label-md mb-xs" style="color:var(--on-surface);margin-top:8px;">${escapeHtml(c.paper_name)}</h4>
+                        <p class="label-sm text-muted mb-sm">Page ${c.page} · ${escapeHtml(c.section || 'Table')}</p>
+                        <button class="btn-secondary btn-xs" type="button"><span class="material-symbols-outlined" style="font-size:14px;">table_chart</span> View table</button>
+                    </div>` : `
                     <div class="citation-card">
                         <span class="citation-tag">[${i + 1}] ${Math.round(c.score * 100)}% match</span>
                         <h4 class="label-md mb-xs" style="color:var(--on-surface);margin-top:8px;">${escapeHtml(c.paper_name)}</h4>
                         <p class="label-sm text-muted mb-sm">Page ${c.page} · ${escapeHtml(c.section || 'Unknown section')}</p>
-                        <div class="citation-snippet"><p>${escapeHtml(c.text_snippet.length > 600 ? c.text_snippet.substring(0, 600) + '...' : c.text_snippet)}</p></div>
+                        <div class="citation-snippet"><p>${mathText(c.text_snippet.length > 600 ? c.text_snippet.substring(0, 600) + '...' : c.text_snippet)}</p></div>
                     </div>`).join('')}
                 </div>
             </details>` : ''}
@@ -891,6 +931,310 @@ async function runComparison() {
             </div>
         </div>`;
     } catch (e) { resultEl.innerHTML = errorBox(e.message); }
+}
+
+// ============================================================
+// Modal + interactive table viewer (Novelty 4)
+// ============================================================
+function closeModal() {
+    document.getElementById('modal')?.remove();
+    document.removeEventListener('keydown', modalKeydown);
+}
+
+function modalKeydown(e) { if (e.key === 'Escape') closeModal(); }
+
+function openModal(title, bodyHtml) {
+    closeModal();
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-backdrop';
+    wrap.id = 'modal';
+    wrap.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+        <div class="modal-header">
+            <h3 class="headline-md" style="min-width:0;overflow-wrap:anywhere;">${escapeHtml(title)}</h3>
+            <button class="btn-icon" style="border:none;flex-shrink:0;" onclick="closeModal()" aria-label="Close"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <div class="modal-body custom-scrollbar">${bodyHtml}</div>
+    </div>`;
+    wrap.addEventListener('click', e => { if (e.target === wrap) closeModal(); });
+    document.body.appendChild(wrap);
+    document.addEventListener('keydown', modalKeydown);
+    wrap.querySelector('.modal-header button').focus();
+}
+
+async function loadTables(paperId) {
+    state.tablesCache = state.tablesCache || {};
+    if (!state.tablesCache[paperId]) state.tablesCache[paperId] = await api.get(`/tables/${paperId}`);
+    return state.tablesCache[paperId];
+}
+
+const cellKey = (s) => (s || '').toLowerCase().replace(/[\s*_`]+/g, ' ').trim();
+
+function captionNumber(caption) {
+    const m = /^(?:Table|TABLE|Tab\.)\s*(\d+|[IVX]+)/.exec(caption || '');
+    return m ? m[1] : null;
+}
+
+/** Cell-level references in an answer, e.g. (Table 2, row "Ours", column "F1"). */
+function cellReferences(answer, table) {
+    const refs = [];
+    const re = /Table\s*(\d+|[IVX]+)\s*,\s*row\s*["“'‘]([^"”'’]+)["”'’]\s*,\s*col(?:umn)?\s*["“'‘]([^"”'’]+)["”'’]/gi;
+    const ids = new Set([String(table.table_index), captionNumber(table.caption)].filter(Boolean));
+    for (const m of (answer || '').matchAll(re)) {
+        if (ids.has(m[1])) refs.push({ row: cellKey(m[2]), col: cellKey(m[3]) });
+    }
+    return refs;
+}
+
+function renderDataTable(table, refs = []) {
+    const headers = table.headers.map(cellKey);
+    const matchesCol = (j, col) => headers[j] === col || (col.length > 1 && headers[j].includes(col));
+    const matchesRow = (row, label) => { const k = cellKey(row[0]); return k === label || (label.length > 1 && k.includes(label)); };
+    const hitRows = new Set(), hitCols = new Set(), hitCells = new Set();
+    refs.forEach(ref => {
+        const rows = table.rows.map((r, i) => matchesRow(r, ref.row) ? i : -1).filter(i => i >= 0);
+        const cols = headers.map((_, j) => matchesCol(j, ref.col) ? j : -1).filter(j => j >= 0);
+        rows.forEach(i => hitRows.add(i));
+        cols.forEach(j => hitCols.add(j));
+        rows.forEach(i => cols.forEach(j => hitCells.add(`${i}:${j}`)));
+    });
+    return `
+    <div class="data-table-wrap">
+        <table class="data-table">
+            <thead><tr>${table.headers.map((h, j) => `<th class="${hitCols.has(j) ? 'hl-col' : ''}">${mathText(h)}</th>`).join('')}</tr></thead>
+            <tbody>${table.rows.map((row, i) => `
+                <tr class="${hitRows.has(i) ? 'hl-row' : ''}">${row.map((c, j) => `<td class="${hitCells.has(`${i}:${j}`) ? 'hl-cell' : hitCols.has(j) ? 'hl-col' : ''}">${mathText(c)}</td>`).join('')}</tr>`).join('')}
+            </tbody>
+        </table>
+    </div>`;
+}
+
+async function openTableModal(paperId, tableIndex, msgIndex) {
+    const data = await attempt(loadTables(paperId));
+    const table = data?.tables.find(t => t.table_index === tableIndex);
+    if (!table) return showToast('This table is no longer available. Re-index the paper.', 'error');
+    const answer = msgIndex !== undefined ? state.chatHistory[msgIndex]?.content : '';
+    const refs = cellReferences(answer, table);
+    openModal(table.caption, `
+        <p class="label-sm text-muted mb-sm">${escapeHtml(data.paper_title)} · page ${table.page}
+            · <a href="/api/papers/${paperId}/pdf#page=${table.page}" target="_blank" rel="noopener">open PDF page</a></p>
+        ${refs.length ? `<p class="label-sm mb-sm" style="color:var(--tertiary);">Highlighted: ${refs.length} cell reference${refs.length > 1 ? 's' : ''} cited in the answer.</p>` : ''}
+        ${renderDataTable(table, refs)}`);
+}
+
+async function openTablesList(paperId) {
+    const data = await attempt(loadTables(paperId));
+    if (!data) return;
+    openModal(`Extracted tables · ${data.paper_title}`, data.tables.length
+        ? data.tables.map(t => `
+            <section class="mb-md">
+                <h4 class="label-md mb-xs" style="color:var(--on-surface);">${escapeHtml(t.caption)}</h4>
+                <p class="label-sm text-muted mb-sm">Page ${t.page} · ${t.headers.length} columns × ${t.rows.length} rows</p>
+                ${renderDataTable(t)}
+            </section>`).join('')
+        : `<p class="body-sm text-muted mb-md">No tables were found in this paper. If it was indexed before table extraction was added, re-index it to run the table stream.</p>
+           <button class="btn-secondary" onclick="closeModal();delete state.tablesCache['${paperId}'];reindexPaper('${paperId}')"><span class="material-symbols-outlined" style="font-size:18px;">refresh</span> Re-index paper</button>`);
+}
+
+// ============================================================
+// PAGE: Reproducibility audit (Novelty 2)
+// ============================================================
+const AUDIT_STATUS = { specified: 'Specified', partial: 'Partial', inferred: 'Inferred', missing: 'Missing' };
+
+function scoreColor(score) {
+    return score >= 80 ? 'var(--success)' : score >= 60 ? 'var(--tertiary)' : 'var(--error)';
+}
+
+function scoreGauge(score) {
+    const r = 52, c = 2 * Math.PI * r, offset = c * (1 - Math.max(0, Math.min(100, score)) / 100);
+    return `
+    <svg class="gauge" viewBox="0 0 128 128" role="img" aria-label="ReproScore ${score.toFixed(1)} out of 100">
+        <circle cx="64" cy="64" r="${r}" fill="none" stroke="var(--surface-container-highest)" stroke-width="12" />
+        <circle cx="64" cy="64" r="${r}" fill="none" stroke="${scoreColor(score)}" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 64 64)" />
+        <text x="64" y="62" text-anchor="middle" class="gauge-value">${score.toFixed(0)}</text>
+        <text x="64" y="82" text-anchor="middle" class="gauge-label">/ 100</text>
+    </svg>`;
+}
+
+function quickBadges(report) {
+    const badges = [];
+    const live = report.signals.link_checks.filter(l => l.live);
+    const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, '').split('.')[0]; } catch { return 'link'; } };
+    if (live.length) badges.push(['ok', 'code', `Code: Verified (${host(live[0].url)})`]);
+    else if (report.signals.link_checks.some(l => l.live === false)) badges.push(['bad', 'link_off', 'Code: Dead link']);
+    else if (report.signals.repo_urls.length) badges.push(['warn', 'code', `Code: ${host(report.signals.repo_urls[0])} (unverified)`]);
+    else badges.push(['bad', 'code_off', 'Code: Missing']);
+
+    const seed = report.categories.flatMap(c => c.items).find(i => /seed/i.test(i.parameter));
+    if (!seed || seed.status === 'missing') badges.push(['bad', 'casino', 'Seeds: Missing (Risk: High)']);
+    else badges.push([seed.status === 'specified' ? 'ok' : 'warn', 'casino', `Seeds: ${seed.value || AUDIT_STATUS[seed.status]}`]);
+
+    const hw = report.estimated_hardware.split(' | ')[0];
+    if (hw && hw !== 'Not reported') badges.push(['ok', 'memory', `Compute: ${hw}`]);
+    else if (report.signals.accelerators.length) badges.push(['warn', 'memory', `Compute: ${report.signals.accelerators.join(', ')}`]);
+    else badges.push(['bad', 'memory', 'Compute: Not reported']);
+
+    if (report.potential_leakage_risks.length) badges.push(['warn', 'water_drop', `${report.potential_leakage_risks.length} leakage risk${report.potential_leakage_risks.length > 1 ? 's' : ''}`]);
+    return badges.map(([tone, icon, label]) => `
+        <span class="quick-badge ${tone}"><span class="material-symbols-outlined">${icon}</span>${escapeHtml(label)}</span>`).join('');
+}
+
+function auditItemRow(item, paperId) {
+    const page = item.citation_page
+        ? `<a class="page-link" href="/api/papers/${paperId}/pdf#page=${item.citation_page}" target="_blank" rel="noopener" title="Open the PDF at this page">p. ${item.citation_page}</a>` : '';
+    return `
+    <div class="audit-item">
+        <span class="pill pill-${item.status}">${AUDIT_STATUS[item.status] || escapeHtml(item.status)}</span>
+        <div style="flex:1;min-width:0;">
+            <div class="label-md" style="color:var(--on-surface);">${escapeHtml(item.parameter)}
+                ${item.value ? `<code class="audit-value">${escapeHtml(item.value)}</code>` : ''} ${page}</div>
+            <div class="body-sm text-muted">${mathText(item.note)}</div>
+        </div>
+        <span class="risk risk-${item.risk_level}" title="Replication risk">${escapeHtml(item.risk_level)}</span>
+    </div>`;
+}
+
+function renderAuditReport(report, tableCount) {
+    const pid = report.paper_id;
+    const categories = report.categories.map(c => `
+        <details class="audit-category">
+            <summary>
+                <div style="flex:1;min-width:0;">
+                    <div class="label-md" style="color:var(--on-surface);">${escapeHtml(c.category_name)}</div>
+                    <div class="score-bar"><span style="width:${c.score}%;background:${scoreColor(c.score)};"></span></div>
+                </div>
+                <div class="category-score"><strong style="color:${scoreColor(c.score)};">${c.score.toFixed(0)}</strong><span class="label-sm text-muted"> · ${Math.round(c.weight * 100)}%</span></div>
+                <span class="material-symbols-outlined chevron">expand_more</span>
+            </summary>
+            <div class="audit-items">${c.items.map(i => auditItemRow(i, pid)).join('')}</div>
+        </details>`).join('');
+
+    const list = (items, empty) => items.length ? `<ul class="audit-list">${items.map(m => `<li>${mathText(m)}</li>`).join('')}</ul>` : `<p class="body-sm text-muted">${empty}</p>`;
+
+    return `
+    <div style="display:flex;flex-direction:column;gap:var(--sp-md);">
+        <section class="academic-glass audit-summary">
+            ${scoreGauge(report.overall_score)}
+            <div class="grade-badge" style="border-color:${scoreColor(report.overall_score)};color:${scoreColor(report.overall_score)};">${escapeHtml(report.grade)}</div>
+            <div style="flex:1;min-width:220px;">
+                <h3 class="headline-md mb-xs">${escapeHtml(report.classification)}</h3>
+                <p class="body-sm text-muted mb-sm">${escapeHtml(report.paper_title)}</p>
+                <div class="quick-badges">${quickBadges(report)}</div>
+                <p class="label-sm text-muted" style="margin-top:12px;">${report.cached ? 'Cached audit' : `Generated in ${report.latency_sec.toFixed(1)}s`} · ${timeAgo(report.created_at)}</p>
+            </div>
+        </section>
+
+        <section>
+            <h3 class="headline-md mb-sm">Dimension breakdown</h3>
+            ${categories}
+        </section>
+
+        <div class="grid-2">
+            <section class="academic-glass audit-card">
+                <h3 class="label-md mb-sm" style="color:var(--error);"><span class="material-symbols-outlined" style="font-size:18px;vertical-align:-4px;">report</span> Missing critical parameters</h3>
+                ${list(report.missing_critical_parameters, 'None identified.')}
+            </section>
+            <section class="academic-glass audit-card">
+                <h3 class="label-md mb-sm" style="color:var(--tertiary);"><span class="material-symbols-outlined" style="font-size:18px;vertical-align:-4px;">water_drop</span> Potential leakage risks</h3>
+                ${list(report.potential_leakage_risks, 'None identified.')}
+            </section>
+        </div>
+
+        <section>
+            <h3 class="headline-md mb-sm">Reproduction blueprint</h3>
+            <div class="academic-glass audit-card mb-md">
+                <div class="label-md text-muted mb-xs">ESTIMATED HARDWARE</div>
+                <div class="body-md" style="color:var(--on-surface);">${escapeHtml(report.estimated_hardware)}</div>
+            </div>
+            <div class="code-box">
+                <div class="code-box-header">
+                    <span class="label-sm text-muted">bash · <code>&lt;SWEEP&gt;</code> = not reported in the paper</span>
+                    <button class="btn-secondary btn-xs" onclick="copyRecipeCommand('${pid}')"><span class="material-symbols-outlined" style="font-size:14px;">content_copy</span> Copy</button>
+                </div>
+                <pre><code>${escapeHtml(report.recipe_command)}</code></pre>
+            </div>
+            <details class="audit-category" style="margin-top:12px;">
+                <summary><span class="label-md" style="flex:1;color:var(--on-surface);">Full reproduction recipe</span><span class="material-symbols-outlined chevron">expand_more</span></summary>
+                <div class="markdown body-md" style="padding:0 16px 16px;">${md(report.reproduction_recipe)}</div>
+            </details>
+        </section>
+
+        <div class="result-actions" style="flex-wrap:wrap;">
+            <a class="btn-primary" href="/api/audit/${pid}/export" download><span class="material-symbols-outlined" style="font-size:18px;">download</span> Download Peer Reviewer Scorecard (.md)</a>
+            <button class="btn-secondary" onclick="openTablesList('${pid}')"><span class="material-symbols-outlined" style="font-size:18px;">table_chart</span> ${tableCount === null ? 'Extracted tables' : `${tableCount} extracted table${tableCount === 1 ? '' : 's'}`}</button>
+        </div>
+    </div>`;
+}
+
+async function renderAudit(el) {
+    const papers = await readyPapers();
+    const selected = papers.some(p => p.id === state.auditPaper) ? state.auditPaper : (state.selectedPapers[0] || papers[0]?.id);
+    state.auditReports = state.auditReports || {};
+    el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:var(--sp-lg);">
+        <div>
+            <h2 class="headline-lg mb-xs">Reproducibility & Leakage Audit</h2>
+            <p class="body-md text-muted">Scores a paper across five weighted dimensions (hyperparameters 25%, compute 15%, data & leakage 25%, statistical rigor 20%, artifacts 15%) using its text, extracted tables and live repository-link checks.</p>
+        </div>
+        <div class="audit-controls">
+            <div style="flex:1;min-width:220px;">
+                <label class="form-label" for="audit-paper">PAPER</label>
+                <select class="form-select" id="audit-paper" onchange="state.auditPaper=this.value;showAuditFor(this.value);">
+                    ${papers.length ? papers.map(p => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${escapeHtml(p.title)}</option>`).join('') : '<option disabled selected>No indexed papers</option>'}
+                </select>
+            </div>
+            <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+                <button class="btn-primary" onclick="runAudit(false)"><span class="material-symbols-outlined" style="font-size:18px;">verified</span> Run Audit</button>
+                <button class="btn-secondary" onclick="runAudit(true)" title="Ignore the cached audit and re-run with the current LLM">Re-run</button>
+            </div>
+        </div>
+        <div id="audit-result"></div>
+    </div>`;
+    if (selected) { state.auditPaper = selected; showAuditFor(selected); }
+}
+
+async function showAuditFor(paperId) {
+    const resultEl = document.getElementById('audit-result');
+    if (!resultEl) return;
+    const stillSelected = () => state.currentPage === 'audit' && document.getElementById('audit-paper')?.value === paperId;
+    let report = state.auditReports?.[paperId];
+    if (!report) {
+        resultEl.innerHTML = spinner();
+        // Cache lookup only: never triggers an LLM call.
+        report = await api.get(`/audit/${paperId}?generate=false`).catch(() => null);
+        if (report) state.auditReports[paperId] = report;
+    }
+    if (!stillSelected()) return;
+    if (!report) {
+        resultEl.innerHTML = `<div class="empty-hint"><span class="material-symbols-outlined">fact_check</span><p class="body-sm text-muted">No audit yet. Run the audit to score this paper. The first run takes 10-30 seconds; results are cached.</p></div>`;
+        return;
+    }
+    const tables = await loadTables(paperId).catch(() => null);
+    if (stillSelected()) resultEl.innerHTML = renderAuditReport(report, tables ? tables.tables.length : null);
+}
+
+async function runAudit(refresh) {
+    const paperId = document.getElementById('audit-paper')?.value;
+    if (!paperId || paperId === 'No indexed papers') return showToast('Upload and index a paper first.', 'info');
+    const resultEl = document.getElementById('audit-result');
+    resultEl.innerHTML = `${spinner()}<p class="body-sm text-muted text-center">Auditing hyperparameters, compute, data hygiene, statistics and artifacts...</p>`;
+    try {
+        const [report, tables] = await Promise.all([
+            refresh ? api.post(`/audit/${paperId}/refresh`) : api.get(`/audit/${paperId}`),
+            loadTables(paperId).catch(() => null),
+        ]);
+        state.auditReports[paperId] = report;
+        if (state.currentPage === 'audit' && document.getElementById('audit-paper')?.value === paperId) {
+            resultEl.innerHTML = renderAuditReport(report, tables ? tables.tables.length : null);
+        }
+    } catch (e) { resultEl.innerHTML = errorBox(e.message); }
+}
+
+function copyRecipeCommand(paperId) {
+    const cmd = state.auditReports?.[paperId]?.recipe_command;
+    if (!cmd) return;
+    navigator.clipboard?.writeText(cmd).then(() => showToast('Command copied.', 'success'), () => showToast('Copy failed.', 'error'));
 }
 
 // ============================================================

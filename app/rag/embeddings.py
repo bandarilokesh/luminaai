@@ -40,17 +40,26 @@ class JinaEmbeddings:
             "embedding_type": "float",
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
-        for attempt in range(5):
+        for attempt in range(6):
             try:
                 response = self._http.post(settings.EMBEDDING_URL, json=payload, headers=headers)
             except httpx.HTTPError as e:
-                if attempt == 4:
+                if attempt == 5:
                     raise EmbeddingError(f"Could not reach Jina embeddings API: {e}") from e
                 time.sleep(2 ** attempt)
                 continue
-            if response.status_code in _RETRY_STATUS and attempt < 4:
-                wait = float(response.headers.get("retry-after", 2 ** attempt))
-                logger.warning(f"Jina API returned {response.status_code}; retrying in {wait:.0f}s")
+            if response.status_code in _RETRY_STATUS and attempt < 5:
+                retry_header = response.headers.get("retry-after")
+                if retry_header:
+                    try:
+                        wait = float(retry_header)
+                    except ValueError:
+                        wait = float(max(5, 5 * (attempt + 1)))
+                elif response.status_code == 429:
+                    wait = float(max(5, 5 * (attempt + 1)))
+                else:
+                    wait = float(2 ** attempt)
+                logger.warning(f"Jina API returned {response.status_code}; retrying in {wait:.0f}s (attempt {attempt + 1}/6)")
                 time.sleep(wait)
                 continue
             if response.status_code != 200:
@@ -69,6 +78,8 @@ class JinaEmbeddings:
             batch, used = self._request(texts[start:start + size], task="retrieval.passage")
             vectors.extend(batch)
             tokens += used
+            if start + size < len(texts):
+                time.sleep(0.3)
         langfuse.update_current_generation(
             model=self.model, usage_details={"input": tokens}, metadata={"texts": len(texts)}
         )

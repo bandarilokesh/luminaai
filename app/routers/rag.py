@@ -62,6 +62,15 @@ def ask(req: QARequest):
     return result
 
 
+@router.post("/qa/table", response_model=QAResponse)
+def ask_table(req: QARequest):
+    """Table-targeted QA: always searches the extracted tables and demands cell-level citations."""
+    _require_papers(req.paper_ids)
+    result = _run(lambda: answer_question(req.question, req.paper_ids or None, table_mode=True))
+    db.add_qa_log(req.paper_ids, req.question, result)
+    return result
+
+
 @router.post("/qa/stream")
 async def ask_stream(req: QARequest):
     """Server-sent events: meta (citations) -> token* -> done (or error)."""
@@ -154,11 +163,13 @@ def system_status():
     services = []
     vectors = 0
     try:
-        info = get_vector_store().info()
+        store = get_vector_store()
+        info = store.info()
         vectors = info["points_count"]
         services.append(ServiceStatus(
             name="Qdrant", status="ok",
-            detail=f"{settings.QDRANT_URL} - {vectors} vectors, {info['vector_size']}-dim {info['distance']}",
+            detail=f"{settings.QDRANT_URL} - {vectors} vectors + {store.count_tables()} tables, "
+                   f"{info['vector_size']}-dim {info['distance']}",
         ))
     except Exception as e:
         services.append(ServiceStatus(name="Qdrant", status="error", detail=f"Unreachable at {settings.QDRANT_URL}: {e}"[:200]))

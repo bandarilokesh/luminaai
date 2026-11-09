@@ -7,10 +7,28 @@ from app.rag.chunker import count_tokens
 NOT_FOUND_ANSWER = "I don't know - the uploaded papers do not contain enough information to answer that."
 
 # System prompt: grounded generation, answer only from the retrieved context.
+_TABLE_CITATION_RULE = """Some context blocks are TABLES (their header says "TABLE"). When a claim uses a number from a table,
+cite it with cell-level precision: [n] (Table <k>, row "<row label>", column "<column header>").
+Copy numbers exactly as they appear in the table; never round, average or invent values."""
+
+_MATH_RULE = "Write mathematics in LaTeX: $...$ inline and $$...$$ for display equations."
+
 QA_SYSTEM_PROMPT = f"""You are Lumina, an AI research assistant.
 Answer only using the provided context from the user's research papers.
 Cite the supporting context after each claim using its number in square brackets, e.g. [1] or [2][3].
+{_TABLE_CITATION_RULE}
+{_MATH_RULE}
 Be concise and precise. Use Markdown for lists or tables when it helps.
+If the answer is not available in the context, reply exactly: "{NOT_FOUND_ANSWER}"
+"""
+
+TABLE_QA_SYSTEM_PROMPT = f"""You are Lumina, an AI research assistant specialised in empirical results.
+Answer only using the provided context from the user's research papers, prioritising the TABLE blocks.
+Every numeric claim MUST carry a cell-level citation: [n] (Table <k>, row "<row label>", column "<column header>").
+Copy numbers exactly as written in the table; never round, average or invent values. If the tables do not
+contain the requested value, say which tables you checked and that the value is not reported.
+{_MATH_RULE}
+Use a compact Markdown table when comparing several values.
 If the answer is not available in the context, reply exactly: "{NOT_FOUND_ANSWER}"
 """
 
@@ -34,7 +52,11 @@ def format_context(chunks: list[dict[str, Any]], budget_tokens: int = settings.C
     """
     blocks, used, total = [], [], 0
     for chunk in chunks:
-        header = f"[{len(used) + 1}] {chunk['paper_name']} | page {chunk['page']} | {chunk.get('section') or 'Unknown section'}"
+        if chunk.get("kind") == "table":
+            header = (f"[{len(used) + 1}] TABLE {chunk['table_index']} | {chunk['paper_name']} | page {chunk['page']} | "
+                      f"{chunk.get('section') or 'Table'}")
+        else:
+            header = f"[{len(used) + 1}] {chunk['paper_name']} | page {chunk['page']} | {chunk.get('section') or 'Unknown section'}"
         block = f"{header}\n{chunk['text'].strip()}"
         cost = count_tokens(block)
         if used and total + cost > budget_tokens:
@@ -45,9 +67,11 @@ def format_context(chunks: list[dict[str, Any]], budget_tokens: int = settings.C
     return "\n\n---\n\n".join(blocks), used
 
 
-def build_qa_prompt(question: str, chunks: list[dict[str, Any]]) -> tuple[str, str, list[dict[str, Any]]]:
+def build_qa_prompt(
+    question: str, chunks: list[dict[str, Any]], system_prompt: str = QA_SYSTEM_PROMPT
+) -> tuple[str, str, list[dict[str, Any]]]:
     context, used = format_context(chunks)
-    return QA_SYSTEM_PROMPT, QA_TEMPLATE.format(context=context, question=question), used
+    return system_prompt, QA_TEMPLATE.format(context=context, question=question), used
 
 
 SUMMARY_STYLES: dict[str, dict[str, str]] = {

@@ -6,6 +6,7 @@ pydantic-settings>=2.4
 
 # Loader: PDF parsing
 pymupdf>=1.24
+pdfplumber>=0.11.0  # table extraction (dual-stream parser)
 
 # Embeddings (Jina AI API) + LLM (Groq / Gemini via OpenAI-compatible endpoints)
 httpx>=0.27

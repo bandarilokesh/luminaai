@@ -21,6 +21,8 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./data:/app/data
+      - ./app:/app/app
+      - ./frontend:/app/frontend
     depends_on:
       - qdrant
     restart: unless-stopped

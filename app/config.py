@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION: str = "lumina_papers"
+    QDRANT_TABLE_COLLECTION: str = "lumina_tables"
 
     # Chunking (sizes in tokens; common chunk size is 200-500 with 10-20% overlap)
     CHUNK_SIZE: int = 400
@@ -45,6 +46,12 @@ class Settings(BaseSettings):
     TOP_K: int = 5
     SCORE_THRESHOLD: float = 0.0
     CONTEXT_TOKEN_BUDGET: int = 6000
+    TOP_K_TABLES: int = 2
+
+    # Reproducibility audit
+    AUDIT_MAX_TOKENS: int = 4096
+    AUDIT_CONTEXT_BUDGET: int = 5000
+    AUDIT_VERIFY_LINKS: bool = True  # HEAD-check repository URLs found in the paper
 
     # Observability (Langfuse). Tracing is disabled when keys are blank.
     LANGFUSE_PUBLIC_KEY: str = ""

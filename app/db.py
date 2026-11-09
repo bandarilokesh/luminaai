@@ -1,4 +1,4 @@
-"""SQLite store for paper metadata, QA history, summary cache and activity.
+"""SQLite store for paper metadata, QA history, summary cache, extracted tables, audits and activity.
 
 Vectors live in Qdrant; this database only keeps application records.
 """
@@ -42,6 +42,24 @@ CREATE TABLE IF NOT EXISTS summaries (
     summary_text TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (paper_id, summary_type)
+);
+CREATE TABLE IF NOT EXISTS paper_tables (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    table_index INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    caption TEXT NOT NULL,
+    markdown TEXT NOT NULL,
+    json_data TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_tables_paper ON paper_tables(paper_id, table_index);
+CREATE TABLE IF NOT EXISTS reproducibility_audits (
+    paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+    overall_score REAL NOT NULL,
+    grade TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,6 +167,56 @@ class Database:
                 "INSERT OR REPLACE INTO summaries (paper_id, summary_type, summary_text, created_at) VALUES (?, ?, ?, ?)",
                 (paper_id, summary_type, text, _now()),
             )
+
+    # --- extracted tables (Stream B) ---
+    def replace_paper_tables(self, paper_id: str, tables: list[Any]) -> int:
+        """Store a paper's ExtractedTable objects, replacing any from a previous indexing run."""
+        now = _now()
+        with self._conn() as conn:
+            conn.execute("DELETE FROM paper_tables WHERE paper_id = ?", (paper_id,))
+            conn.executemany(
+                "INSERT INTO paper_tables (id, paper_id, table_index, page, caption, markdown, json_data, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (f"{paper_id}:{t.table_index}", paper_id, t.table_index, t.page, t.caption, t.markdown,
+                     json.dumps(t.json_data), now)
+                    for t in tables
+                ],
+            )
+        return len(tables)
+
+    def get_paper_tables(self, paper_id: str) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT table_index, page, caption, markdown, json_data FROM paper_tables WHERE paper_id = ? ORDER BY table_index",
+                (paper_id,),
+            ).fetchall()
+        tables = []
+        for r in rows:
+            data = json.loads(r["json_data"])
+            tables.append({
+                "table_index": r["table_index"], "page": r["page"], "caption": r["caption"], "markdown": r["markdown"],
+                "headers": data.get("headers", []), "rows": data.get("rows", []),
+            })
+        return tables
+
+    # --- reproducibility audits ---
+    def get_audit(self, paper_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT report_json FROM reproducibility_audits WHERE paper_id = ?", (paper_id,)).fetchone()
+        return json.loads(row["report_json"]) if row else None
+
+    def save_audit(self, paper_id: str, report: dict[str, Any]) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO reproducibility_audits (paper_id, overall_score, grade, report_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (paper_id, report["overall_score"], report["grade"], json.dumps(report), report.get("created_at") or _now()),
+            )
+
+    def delete_audit(self, paper_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM reproducibility_audits WHERE paper_id = ?", (paper_id,))
 
     # --- activity & stats ---
     def log_activity(self, event_type: str, description: str, paper_id: str | None = None) -> None:

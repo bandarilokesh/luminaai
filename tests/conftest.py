@@ -1,4 +1,5 @@
 import hashlib
+import json
 import math
 import os
 import re
@@ -19,6 +20,7 @@ os.environ.update({
     "GROQ_API_KEY": "test",
     "LLM_PROVIDER": "groq",
     "EMBEDDING_DIM": "256",
+    "AUDIT_VERIFY_LINKS": "false",
 })
 
 import pymupdf  # noqa: E402
@@ -52,6 +54,8 @@ def offline_models(monkeypatch):
             return '{"questions": [{"question": "What does the transformer use?", "options": ["Attention", "Recurrence", "Convolution", "Trees"], "answer": "Attention", "explanation": "See [1]."}]}'
         if name == "flashcards":
             return '{"cards": [{"front": "Self-attention", "back": "Relates all tokens in the input.", "explanation": ""}]}'
+        if name == "reproducibility-audit":
+            return json.dumps(FAKE_AUDIT)
         if name == "research-gaps":
             return '```json\n{"gaps": [{"title": "Small datasets", "description": "Only tested on one dataset.", "category": "limitation", "papers": ["A"], "confidence": "high", "suggestion": "More data."}]}\n```'
         return f"Stub answer for {name} [1]"
@@ -64,6 +68,34 @@ def offline_models(monkeypatch):
     monkeypatch.setattr(llm, "generate", fake_generate)
     monkeypatch.setattr(llm, "stream", fake_stream)
     return calls
+
+
+FAKE_AUDIT = {
+    "dimensions": {
+        "hyperparameters": {"score": 70, "items": [
+            {"parameter": "Learning rate", "status": "specified", "value": "3e-4", "citation_page": 1, "risk_level": "low", "note": "Table 1."},
+            {"parameter": "Random seeds", "status": "specified", "value": "42", "citation_page": 1, "risk_level": "low", "note": "Seed 42."},
+            {"parameter": "Warmup", "status": "missing", "value": None, "citation_page": None, "risk_level": "medium", "note": "Not stated."},
+        ]},
+        "compute": {"score": 60, "items": [
+            {"parameter": "Accelerator model", "status": "specified", "value": "8x A100", "citation_page": 2, "risk_level": "low", "note": "A100."},
+            {"parameter": "Training time", "status": "missing", "value": None, "citation_page": None, "risk_level": "high", "note": "Not stated."},
+        ]},
+        "data": {"score": 60, "items": [
+            {"parameter": "Split sizes", "status": "partial", "value": None, "citation_page": 2, "risk_level": "medium", "note": "Benchmark named only."},
+        ]},
+        "statistics": {"score": 25, "items": [
+            {"parameter": "Variance reporting", "status": "missing", "value": None, "citation_page": None, "risk_level": "high", "note": "Single run."},
+        ]},
+        "artifacts": {"score": 90, "items": [
+            {"parameter": "Public code repository", "status": "specified", "value": "github", "citation_page": None, "risk_level": "low", "note": "Claimed."},
+        ]},
+    },
+    "missing_critical_parameters": ["Learning-rate warmup steps"],
+    "potential_leakage_risks": ["No check that benchmark test data was excluded from tuning."],
+    "recipe": {"model_name": "ours-base", "parameter_count_billions": 0.11, "framework": "PyTorch", "hardware": "8x NVIDIA A100",
+               "arguments": {"learning_rate": "3e-4", "batch_size": "64", "seed": "42"}},
+}
 
 
 def make_pdf(path: Path, pages: list[str], title: str = "Attention Based Retrieval for Papers") -> Path:
@@ -97,3 +129,44 @@ SAMPLE_PAGES = [
 @pytest.fixture
 def sample_pdf(tmp_path) -> Path:
     return make_pdf(tmp_path / "paper.pdf", SAMPLE_PAGES)
+
+
+def _draw_row(page, y: float, cells: list[str], xs: list[float], fontsize: float = 9) -> None:
+    for x, text in zip(xs, cells):
+        page.insert_text((x, y), text, fontsize=fontsize)
+
+
+def make_table_pdf(path: Path) -> Path:
+    """Two-page PDF: a fully ruled grid table and a LaTeX booktabs-style table (horizontal rules only)."""
+    doc = pymupdf.open()
+
+    # Page 1: ruled grid with a caption above.
+    page = doc.new_page()
+    page.insert_text((72, 72), "Ruled Table Paper", fontsize=16)
+    page.insert_text((72, 110), "Table 1: Hyperparameters used for training.", fontsize=9)
+    grid = [["Parameter", "Value"], ["Learning rate", "3e-4"], ["Batch size", "64"], ["Seed", "42"]]
+    left, right, top, row_h = 72, 372, 120, 20
+    xs = [left, 222, right]
+    for i in range(len(grid) + 1):
+        page.draw_line((left, top + i * row_h), (right, top + i * row_h))
+    for x in xs:
+        page.draw_line((x, top), (x, top + len(grid) * row_h))
+    for i, row in enumerate(grid):
+        _draw_row(page, top + i * row_h + 14, row, [left + 4, 226])
+
+    # Page 2: booktabs table (top/mid/bottom rules), caption above.
+    page = doc.new_page()
+    page.insert_text((72, 72), "Table 2: Results on the benchmark (accuracy %).", fontsize=9)
+    cols = [72, 220, 320, 420]
+    page.draw_line((72, 84), (500, 84), width=0.8)
+    _draw_row(page, 98, ["Model", "MNLI", "QNLI", "F1"], cols)
+    page.draw_line((72, 104), (500, 104), width=0.5)
+    body = [["Baseline", "84.1", "90.2", "88.0"], ["Ours", "86.7", "92.5", "90.3"], ["Ours (no attn)", "85.0", "91.1", "89.2"]]
+    for i, row in enumerate(body):
+        _draw_row(page, 120 + i * 16, row, cols)
+    page.draw_line((72, 160), (500, 160), width=0.8)
+    page.insert_textbox(pymupdf.Rect(72, 190, 500, 400), "We trained on 8 NVIDIA A100 GPUs with seed 42.", fontsize=10)
+
+    doc.save(path)
+    doc.close()
+    return path

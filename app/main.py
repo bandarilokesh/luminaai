@@ -9,7 +9,7 @@ from app.auth import COOKIE_NAME, LOGIN_PAGE_HTML, OPEN_PATHS, check_code, is_au
 from app.config import settings
 from app.logger import logger
 from app.observability import langfuse
-from app.routers import papers, rag
+from app.routers import audit, papers, rag
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "static"
 
@@ -62,6 +62,7 @@ def health():
 
 app.include_router(papers.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
